@@ -1,18 +1,17 @@
 # 4. Syncing data to another drive
 
-This is for making a **backup copy** of `data/` (your files, thumbnails, and `database.db`) onto
-another drive - as opposed to [external-drive.md](external-drive.md), which is about *relocating*
-where SCloud actively reads/writes from.
+This is for making a **backup copy** of `data/` (files/thumbnails) and `db/` (the sqlite database)
+onto another drive - as opposed to [external-drive.md](external-drive.md), which is about
+*relocating* where SCloud actively reads/writes from.
 
-## Why stop the container first
+They're backed up a little differently, since they behave differently:
 
-`database.db` is a single SQLite file. Copying it while SCloud is actively writing to it (e.g.
-mid-upload) can copy it in an inconsistent state. The simplest safe approach is to briefly stop
-the container, copy everything, then start it again - typically a few seconds of downtime.
-
-If you'd rather not stop it, use SQLite's own online backup (see the "hot backup" note at the
-bottom) for the database specifically, and just note that files uploaded *during* the copy might
-not make it into that particular backup snapshot.
+- **`data/`** is just static files once uploaded - safe to copy anytime, even while the container
+  is running, no special handling needed.
+- **`db/database.db`** is a single SQLite file that SCloud may be actively writing to. Copying it
+  mid-write can capture it in an inconsistent state, so either stop the container briefly first,
+  or use SQLite's own online backup API (see the "hot backup" section below) if you'd rather not
+  take any downtime.
 
 ## Windows (PowerShell)
 
@@ -20,10 +19,11 @@ not make it into that particular backup snapshot.
 cd scloud
 docker compose stop app
 
-# Mirror ./data onto the backup drive. /MIR keeps the backup an exact mirror
-# (deletes files on the backup that no longer exist in the source) - drop
-# /MIR for an additive-only copy instead.
+# Mirror both folders onto the backup drive. /MIR keeps the backup an exact
+# mirror (deletes files on the backup that no longer exist in the source) -
+# drop /MIR for an additive-only copy instead.
 robocopy .\data E:\scloud-backup\data /MIR /Z /R:3
+robocopy .\db   E:\scloud-backup\db   /MIR /Z /R:3
 
 docker compose start app
 ```
@@ -38,6 +38,7 @@ cd scloud
 docker compose stop app
 
 rsync -av --delete ./data/ /mnt/backup-drive/scloud-data/
+rsync -av --delete ./db/   /mnt/backup-drive/scloud-db/
 
 docker compose start app
 ```
@@ -63,8 +64,8 @@ If you want a database snapshot without stopping the container at all:
 ```bash
 docker compose exec app python -c "
 import sqlite3
-src = sqlite3.connect('/app/data/database.db')
-dst = sqlite3.connect('/app/data/database.backup.db')
+src = sqlite3.connect('/app/db/database.db')
+dst = sqlite3.connect('/app/db/database.backup.db')
 src.backup(dst)
 dst.close()
 src.close()
@@ -72,7 +73,7 @@ src.close()
 ```
 
 This uses SQLite's own consistent online backup API, so it's always a clean snapshot even while
-the app is running. Copy `data/database.backup.db` off to your backup location afterward. This
-only covers the database (tags, file metadata, sharing/group structure) - you'd still want to
-`rsync`/`robocopy` the actual file/thumbnail folders separately (those are just static files once
-uploaded, so copying them without stopping the container is safe).
+the app is running. Copy `db/database.backup.db` off to your backup location afterward (it lands
+in your local `SCLOUD_DB_DIR`, alongside the live `database.db`). This only covers the database
+(tags, file metadata, sharing/group structure) - `data/` (the actual files/thumbnails) is safe to
+`rsync`/`robocopy` separately without stopping anything, as noted above.

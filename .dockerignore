@@ -1,6 +1,7 @@
 .git
 .gitignore
 data/
+db/
 config/config.env
 .env
 *.md

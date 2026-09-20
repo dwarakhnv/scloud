@@ -4,6 +4,11 @@ Central place for all static, environment-driven configuration.
 Everything here is derived from ``config/config.env`` (one level above the
 ``src`` directory) so that data/thumbnail/database locations can be moved
 (e.g. to an external drive) without touching any code.
+
+Note that DATA_ROOT (files/thumbnails) and DATABASE_PATH (the sqlite file)
+are independent settings on purpose - see the comment on DATABASE_PATH
+below for why the database shouldn't live on the same portable drive as
+your media.
 """
 import os
 from pathlib import Path
@@ -47,8 +52,19 @@ class Constants:
     PROJECT_ROOT = PROJECT_ROOT
     CONFIG_FILE = CONFIG_FILE
 
+    # DATA_ROOT holds files/thumbnails and is safe to put on a portable,
+    # cross-platform-formatted drive (e.g. exFAT) that moves between Windows
+    # and Linux machines - these are whole-file, mostly-write-once blobs.
+    #
+    # DATABASE_PATH is intentionally a SEPARATE setting, defaulting to a
+    # different directory ("../db" rather than "../data"). SQLite relies on
+    # real file locking to stay consistent, which is exactly what's flaky or
+    # missing on removable media and cross-platform filesystems (exFAT has no
+    # POSIX locking at all; NTFS-via-ntfs-3g and other FUSE drivers are
+    # unreliable for it too). Keep the database on the local, native
+    # filesystem of whichever machine is actually running the app.
     DATA_ROOT = _resolve_path(_get("DATA_ROOT"), "../data")
-    DATABASE_PATH = _resolve_path(_get("DATABASE_PATH"), "../data/database.db")
+    DATABASE_PATH = _resolve_path(_get("DATABASE_PATH"), "../db/database.db")
 
     # --- Django settings sourced from config ------------------------
     SECRET_KEY = _get("SECRET_KEY", "insecure-dev-key-change-me")

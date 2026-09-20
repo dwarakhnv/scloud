@@ -55,9 +55,14 @@ All static/environment configuration lives in [`config/config.env`](config/confi
 read by [`src/scloud/constants.py`](src/scloud/constants.py) (the `Constants` class). Key
 settings:
 
-- `DATA_ROOT` — where all user/group files & thumbnails live. Point this at an external drive
-  path to move storage off the local disk (e.g. `DATA_ROOT=D:/scloud-data`).
-- `DATABASE_PATH` — location of the sqlite database file.
+- `DATA_ROOT` — where all user/group files & thumbnails live. Point this at an external/portable
+  drive to move storage off the local disk (e.g. `DATA_ROOT=D:/scloud-data`) — safe to format that
+  drive exFAT if it needs to move between Windows and Linux.
+- `DATABASE_PATH` — location of the sqlite database file. **Deliberately a separate setting from
+  `DATA_ROOT`**, defaulting to its own `../db/database.db` rather than living inside `../data/`.
+  Keep this on local, native storage — SQLite needs real file locking to stay consistent, which
+  removable/cross-platform-formatted drives (exFAT, NTFS-via-ntfs-3g) don't reliably provide. See
+  [docs/external-drive.md](docs/external-drive.md) for the full reasoning.
 - `SECRET_KEY` / `DEBUG` / `ALLOWED_HOSTS` — standard Django settings, sourced from here instead
   of hardcoding in `settings.py`.
 - `MAX_UPLOAD_SIZE_MB` — per-file upload size cap (default 10240 = 10 GB).
@@ -97,8 +102,10 @@ allowed:
 On disk, data is organized as:
 
 ```
+db/
+  database.db         # separate from data/ - see DATABASE_PATH above
+
 data/
-  database.db
   user_<id>/
     files/            # original uploads, original filenames preserved
     thumbnails/        # low-quality jpeg previews, named <file_id>.jpg

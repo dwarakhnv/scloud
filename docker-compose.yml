@@ -9,10 +9,15 @@ services:
       # Cloudflare Tunnel (cloudflared) at that address to expose it publicly.
       - "${SCLOUD_PORT:-5125}:${SCLOUD_PORT:-5125}"
     volumes:
-      # Where your actual files/thumbnails/database live. Change
-      # SCLOUD_DATA_DIR in .env to point at an external drive - see
-      # docs/external-drive.md. No image rebuild needed for that.
+      # Files/thumbnails. Safe to point at a portable, cross-platform drive
+      # (e.g. exFAT) you move between Windows and Linux - change
+      # SCLOUD_DATA_DIR in .env. No image rebuild needed. See docs/external-drive.md.
       - ${SCLOUD_DATA_DIR:-./data}:/app/data
+      # The sqlite database. Deliberately a SEPARATE volume from the one
+      # above - keep this on local, native storage (NOT the portable drive)
+      # since SQLite needs real file locking that removable/cross-platform
+      # filesystems don't reliably provide. See docs/external-drive.md.
+      - ${SCLOUD_DB_DIR:-./db}:/app/db
       - ${SCLOUD_CONFIG_DIR:-./config}:/app/config
     environment:
       # gunicorn inside the container binds to this same port, so changing

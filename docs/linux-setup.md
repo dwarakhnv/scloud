@@ -27,7 +27,7 @@ chmod +x launch.sh
 3. Builds the Docker image.
 4. Starts the container, which on its own first boot:
    - Creates `config/config.env` from the template and generates a random secret key.
-   - Runs database migrations (creates `data/database.db` if it doesn't exist).
+   - Runs database migrations (creates `db/database.db` if it doesn't exist).
 5. Prints the URL to open (default http://localhost:5125).
 
 Create your admin account (one-time):
@@ -56,7 +56,8 @@ Right inside the cloned folder:
 
 ```
 scloud/
-  data/      <- photos, videos, thumbnails, database.db
+  data/      <- photos, videos, thumbnails
+  db/        <- database.db
   config/    <- config.env
 ```
 

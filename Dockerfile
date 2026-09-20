@@ -16,7 +16,7 @@ RUN chmod +x /entrypoint.sh
 
 # Data/config are always mounted as volumes in docker-compose.yml, but create
 # the directories so the image also runs standalone (docker run) without them.
-RUN mkdir -p /app/data /app/config
+RUN mkdir -p /app/data /app/db /app/config
 
 WORKDIR /app/src
 
