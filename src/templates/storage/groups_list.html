@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Groups - SCloud{% endblock %}
+{% block body %}
+<div class="topbar">
+  <div class="title">Groups</div>
+  <div class="actions">
+    <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme"><span class="theme-toggle-icon">☀️</span></button>
+    <a class="icon-btn" href="{% url 'accounts:profile' %}" title="Profile">👤</a>
+    <a class="icon-btn" href="{% url 'accounts:logout' %}" title="Sign out" onclick="return confirmLogout(this.href);">⏏</a>
+  </div>
+</div>
+<div class="tabs">
+  <a class="tab" href="{% url 'storage:my_space' %}">My Media</a>
+  <a class="tab active" href="{% url 'storage:groups_list' %}">Groups</a>
+</div>
+<div class="container">
+  {% if not groups %}
+    <div class="empty-state">
+      <div style="font-size:48px;">👥</div>
+      <p>You're not part of any groups yet.</p>
+    </div>
+  {% endif %}
+  <div class="section-card">
+    {% for group in groups %}
+      <a class="list-row" href="{% url 'storage:group_space' group.id %}">
+        <div class="list-thumb">👥</div>
+        <div class="meta">
+          <div class="name">{{ group.name }}</div>
+          <div class="sub">{{ group.members.count }} member{{ group.members.count|pluralize }}</div>
+        </div>
+      </a>
+    {% endfor %}
+  </div>
+</div>
+<a class="fab" href="{% url 'storage:group_create' %}" title="New group">+</a>
+{% endblock %}

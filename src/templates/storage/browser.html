@@ -1,0 +1,263 @@
+{% extends "base.html" %}
+{% block title %}{% if group %}{{ group.name }}{% else %}My Media{% endif %} - SCloud{% endblock %}
+{% block body %}
+
+<div class="topbar">
+  <div class="title">{% if group %}{{ group.name }}{% else %}My Media{% endif %}</div>
+  <div class="actions">
+    <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme"><span class="theme-toggle-icon">☀️</span></button>
+    {% if group %}
+      <a class="icon-btn" href="{% url 'storage:group_manage' group.id %}" title="Manage members">👥</a>
+    {% endif %}
+    <a class="icon-btn" href="{% url 'accounts:profile' %}" title="Profile">👤</a>
+    <a class="icon-btn" href="{% url 'accounts:logout' %}" title="Sign out" onclick="return confirmLogout(this.href);">⏏</a>
+  </div>
+</div>
+
+<div class="tabs">
+  <a class="tab {% if space == 'my' %}active{% endif %}" href="{% url 'storage:my_space' %}">My Media</a>
+  <a class="tab {% if space == 'group' %}active{% endif %}" href="{% url 'storage:groups_list' %}">Groups</a>
+</div>
+
+<div class="container">
+
+  <div class="breadcrumbs">
+    {% if space == 'group' %}
+      <a href="{% url 'storage:group_space' group.id %}">{{ group.name }}</a>
+    {% else %}
+      <a href="{% url 'storage:my_space' %}">My Media</a>
+    {% endif %}
+    {% for part in breadcrumbs %}
+      &rsaquo;
+      {% if space == 'group' %}
+        <a href="{% url 'storage:group_folder' group.id part.id %}">{{ part.name }}</a>
+      {% else %}
+        <a href="{% url 'storage:my_space_folder' part.id %}">{{ part.name }}</a>
+      {% endif %}
+    {% endfor %}
+  </div>
+
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+    <div class="view-switch">
+      <button class="{% if view_mode == 'boxes' %}active{% endif %}" onclick="goView('boxes')">▦ Boxes</button>
+      <button class="{% if view_mode == 'list' %}active{% endif %}" onclick="goView('list')">☰ List</button>
+      <button class="{% if view_mode == 'details' %}active{% endif %}" onclick="goView('details')">▤ Details</button>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <select onchange="goSort(this.value)" title="Sort by">
+        <option value="uploaded" {% if sort_mode == 'uploaded' %}selected{% endif %}>Upload date</option>
+        <option value="captured" {% if sort_mode == 'captured' %}selected{% endif %}>Media date</option>
+        <option value="name" {% if sort_mode == 'name' %}selected{% endif %}>File name</option>
+      </select>
+      <button class="btn secondary" id="select-toggle-btn" onclick="toggleSelectMode()">Select</button>
+      {% if folder %}
+        <button class="btn secondary" onclick="openModal('modal-share')">Share</button>
+      {% endif %}
+      <button class="btn secondary" onclick="openModal('modal-new-folder')">+ Folder</button>
+    </div>
+  </div>
+
+  <div class="tag-chip-row">
+    <span class="tag-chip {% if not active_tag %}active{% endif %}" onclick="window.location='?view={{ view_mode }}&sort={{ sort_mode }}'">All</span>
+    {% for tag in available_tags %}
+      <span class="tag-chip {% if active_tag.id == tag.id %}active{% endif %}"
+            onclick="window.location='?view={{ view_mode }}&sort={{ sort_mode }}&tag={{ tag.id }}'">{{ tag.name }}</span>
+    {% endfor %}
+    <span class="tag-chip" onclick="createTag('{{ space }}', '{{ group.id|default:"" }}')">+ New tag</span>
+  </div>
+
+  {% if not subfolders and not files %}
+    <div class="empty-state">
+      <div style="font-size:48px;">📁</div>
+      <p>Nothing here yet. Tap + to upload files.</p>
+    </div>
+  {% endif %}
+
+  {% if view_mode == 'boxes' %}
+    <div class="grid-boxes">
+      {% for f in subfolders %}
+        <a class="box-item folder-box" href="{% if space == 'group' %}{% url 'storage:group_folder' group.id f.id %}{% else %}{% url 'storage:my_space_folder' f.id %}{% endif %}">
+          <div class="box-thumb">📁</div>
+          <div class="box-label">{{ f.name }}</div>
+        </a>
+      {% endfor %}
+      {% for file in files %}
+        <div class="box-item selectable-item" data-grid-file-id="{{ file.id }}" data-file-id="{{ file.id }}" onclick="handleItemClick(event, {{ forloop.counter0 }}, {{ file.id }})">
+          <div class="select-check" onclick="event.stopPropagation();toggleSelect({{ file.id }}, this)"></div>
+          {% if file.get_thumbnail_url %}
+            <div class="box-thumb"><img src="{{ file.get_thumbnail_url }}" style="width:100%;height:100%;object-fit:cover;" alt="{{ file.filename }}"></div>
+          {% elif file.thumbnail_status == 'pending' %}
+            <div class="box-thumb" data-thumb-pending="1" data-file-id="{{ file.id }}" data-img-class=""><div class="thumb-spinner"></div></div>
+          {% else %}
+            <div class="box-thumb">{% if file.is_video %}🎬{% else %}📄{% endif %}</div>
+          {% endif %}
+          <div class="box-label">{{ file.filename }}</div>
+        </div>
+      {% endfor %}
+    </div>
+  {% elif view_mode == 'list' %}
+    <div class="section-card">
+      {% for f in subfolders %}
+        <a class="list-row" href="{% if space == 'group' %}{% url 'storage:group_folder' group.id f.id %}{% else %}{% url 'storage:my_space_folder' f.id %}{% endif %}">
+          <div class="list-thumb">📁</div>
+          <div class="meta"><div class="name">{{ f.name }}</div><div class="sub">Folder</div></div>
+        </a>
+      {% endfor %}
+      {% for file in files %}
+        <div class="list-row selectable-item" data-row-file-id="{{ file.id }}" data-file-id="{{ file.id }}" onclick="handleItemClick(event, {{ forloop.counter0 }}, {{ file.id }})" style="cursor:pointer;">
+          <div class="select-check" onclick="event.stopPropagation();toggleSelect({{ file.id }}, this)"></div>
+          {% if file.get_thumbnail_url %}
+            <div class="list-thumb"><img src="{{ file.get_thumbnail_url }}" style="width:100%;height:100%;object-fit:cover;border-radius:8px;" alt=""></div>
+          {% elif file.thumbnail_status == 'pending' %}
+            <div class="list-thumb" data-thumb-pending="1" data-file-id="{{ file.id }}"><div class="thumb-spinner"></div></div>
+          {% else %}
+            <div class="list-thumb">{% if file.is_video %}🎬{% else %}📄{% endif %}</div>
+          {% endif %}
+          <div class="meta">
+            <div class="name">{{ file.filename }}</div>
+            <div class="sub">{{ file.size_bytes|filesizeformat }} &middot; {{ file.uploaded_at|date:"M j, Y" }}</div>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div style="overflow-x:auto;">
+      <table class="details-table">
+        <thead>
+          <tr><th></th><th>Name</th><th>Type</th><th>Size</th><th>Uploaded</th><th>Tags</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for f in subfolders %}
+            <tr>
+              <td></td>
+              <td><a href="{% if space == 'group' %}{% url 'storage:group_folder' group.id f.id %}{% else %}{% url 'storage:my_space_folder' f.id %}{% endif %}">📁 {{ f.name }}</a></td>
+              <td>Folder</td><td>—</td><td>{{ f.created_at|date:"M j, Y" }}</td><td>—</td><td></td>
+            </tr>
+          {% endfor %}
+          {% for file in files %}
+            <tr data-row-file-id="{{ file.id }}" data-file-id="{{ file.id }}" class="selectable-item">
+              <td><div class="select-check" onclick="toggleSelect({{ file.id }}, this)" style="position:static;"></div></td>
+              <td><a href="#" onclick="handleItemClick(event, {{ forloop.counter0 }}, {{ file.id }});return false;">{{ file.filename }}</a></td>
+              <td>{% if file.is_image %}Image{% elif file.is_video %}Video{% else %}File{% endif %}</td>
+              <td>{{ file.size_bytes|filesizeformat }}</td>
+              <td>{{ file.uploaded_at|date:"M j, Y H:i" }}</td>
+              <td>{% for t in file.tags.all %}<span class="tag-chip active" style="cursor:default;">{{ t.name }}</span>{% endfor %}</td>
+              <td><button class="overflow-menu-btn" onclick="openLightbox({{ forloop.counter0 }})">⋯</button></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+
+</div>
+
+<label class="fab" for="file-input" title="Upload">
+  +
+  <input id="file-input" type="file" multiple style="display:none"
+         onchange="startUpload(this, '{{ space }}', '{{ group.id|default:"" }}', '{{ folder.id|default:"" }}')">
+</label>
+
+<div id="upload-progress" class="progress-bar" style="display:none;position:fixed;left:16px;right:16px;bottom:90px;z-index:40;">
+  <div class="fill"></div>
+</div>
+
+<!-- Bulk selection action bar -->
+<div id="select-bar" class="select-bar">
+  <span id="select-count">0 selected</span>
+  <div style="display:flex;gap:8px;">
+    <button class="btn secondary" onclick="downloadSelected()">Download</button>
+    <button class="btn secondary" onclick="toggleSelectMode()">Done</button>
+  </div>
+</div>
+
+<!-- New folder modal -->
+<div class="modal-backdrop" id="modal-new-folder">
+  <div class="modal-sheet">
+    <h3>New Folder</h3>
+    <form method="post" action="{% url 'storage:folder_create' %}">
+      {% csrf_token %}
+      <input type="hidden" name="space" value="{{ space }}">
+      <input type="hidden" name="group_id" value="{{ group.id|default:'' }}">
+      <input type="hidden" name="folder_id" value="{{ folder.id|default:'' }}">
+      <input type="text" name="name" placeholder="Folder name" required autofocus>
+      <button type="submit" class="btn block">Create</button>
+      <button type="button" class="btn secondary block" style="margin-top:8px;" onclick="closeModal('modal-new-folder')">Cancel</button>
+    </form>
+  </div>
+</div>
+
+{% if folder %}
+<!-- Share modal -->
+<div class="modal-backdrop" id="modal-share">
+  <div class="modal-sheet">
+    <h3>Share "{{ folder.name }}"</h3>
+    <form method="post" action="{% url 'storage:share_folder' folder.id %}">
+      {% csrf_token %}
+      <div class="checkbox-row"><input type="checkbox" id="perm-upload" name="can_upload"><label for="perm-upload">Allow uploading files</label></div>
+      <div class="checkbox-row"><input type="checkbox" id="perm-folders" name="can_create_folders"><label for="perm-folders">Allow creating folders</label></div>
+      <div class="checkbox-row"><input type="checkbox" id="perm-tags" name="can_manage_tags"><label for="perm-tags">Allow adding/updating tags</label></div>
+      <button type="submit" class="btn block" style="margin-top:12px;">Create Share Link</button>
+    </form>
+    {% for link in folder.share_links.all %}
+      {% if link.is_active %}
+        <div class="share-link-row">
+          <div class="share-link-url" id="share-url-{{ link.id }}">{{ request.scheme }}://{{ request.get_host }}{% url 'storage:shared' link.token %}</div>
+          <div style="display:flex;gap:8px;margin-top:8px;">
+            <button type="button" class="btn secondary" onclick="copyLink('share-url-{{ link.id }}', this)">Copy Link</button>
+            <form method="post" action="{% url 'storage:revoke_share' link.id %}">
+              {% csrf_token %}
+              <button type="submit" class="btn danger">Revoke</button>
+            </form>
+          </div>
+        </div>
+      {% endif %}
+    {% endfor %}
+    <button type="button" class="btn secondary block" style="margin-top:12px;" onclick="closeModal('modal-share')">Close</button>
+  </div>
+</div>
+{% endif %}
+
+<!-- Full-screen media viewer -->
+<div class="lightbox" id="lightbox">
+  <div class="lightbox-topbar">
+    <button class="lightbox-icon-btn" onclick="closeLightbox()" title="Close">✕</button>
+    <div class="lightbox-title" id="lightbox-title"></div>
+    <button class="lightbox-icon-btn" onclick="toggleLightboxMenu()" title="More">⋮</button>
+  </div>
+  <div class="lightbox-stage">
+    <button class="lightbox-nav prev" id="lightbox-prev" onclick="lightboxPrev()">‹</button>
+    <div class="lightbox-media" id="lightbox-media"></div>
+    <button class="lightbox-nav next" id="lightbox-next" onclick="lightboxNext()">›</button>
+  </div>
+  <div class="lightbox-menu" id="lightbox-menu">
+    <div class="lightbox-menu-sheet" id="lightbox-menu-body"></div>
+  </div>
+</div>
+
+{{ files_data|json_script:"files-data" }}
+{{ folders_data|json_script:"folders-data" }}
+{{ tags_data|json_script:"tags-data" }}
+<script>
+  window.SCLOUD_FILES = JSON.parse(document.getElementById('files-data').textContent);
+  window.SCLOUD_FOLDERS = JSON.parse(document.getElementById('folders-data').textContent);
+  window.SCLOUD_TAGS = JSON.parse(document.getElementById('tags-data').textContent);
+  window.SCLOUD_CHUNK_SIZE = {{ chunk_size_bytes }};
+  window.SCLOUD_UPLOAD_URL = "{% url 'storage:upload_files' %}";
+  window.SCLOUD_UPLOAD_CHUNK_URL = "{% url 'storage:upload_chunk' %}";
+
+  function goView(mode) {
+    window.location = '?view=' + mode + '&sort={{ sort_mode }}{% if active_tag %}&tag={{ active_tag.id }}{% endif %}';
+  }
+  function goSort(mode) {
+    window.location = '?view={{ view_mode }}&sort=' + mode + '{% if active_tag %}&tag={{ active_tag.id }}{% endif %}';
+  }
+
+  document.querySelectorAll('.modal-backdrop').forEach(function(el){
+    el.addEventListener('click', function(e){ if (e.target === el) el.classList.remove('open'); });
+  });
+  document.getElementById('lightbox-menu').addEventListener('click', function(e){
+    if (e.target === this) this.classList.remove('open');
+  });
+</script>
+{% endblock %}

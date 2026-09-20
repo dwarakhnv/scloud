@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Manage {{ group.name }} - SCloud{% endblock %}
+{% block body %}
+<div class="topbar">
+  <div class="title">Manage {{ group.name }}</div>
+  <div class="actions">
+    <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme"><span class="theme-toggle-icon">☀️</span></button>
+    <a class="icon-btn" href="{% url 'storage:group_space' group.id %}" title="Back">✕</a>
+  </div>
+</div>
+<div class="container">
+
+  <h3>Group name</h3>
+  <form method="post" class="section-card" style="padding:16px;">
+    {% csrf_token %}
+    <input type="hidden" name="rename_group" value="1">
+    <div class="form-group">
+      {{ rename_form.name }}
+    </div>
+    <button type="submit" class="btn block">Rename Group</button>
+  </form>
+
+  <h3>Members</h3>
+  <div class="section-card">
+    {% for m in memberships %}
+      <div class="list-row">
+        <div class="list-thumb">🙂</div>
+        <div class="meta">
+          <div class="name">{{ m.user.username }}</div>
+          <div class="sub">{{ m.role }}</div>
+        </div>
+        {% if m.user_id != group.owner_id %}
+          <form method="post" onsubmit="return confirm('Remove this member?');">
+            {% csrf_token %}
+            <input type="hidden" name="remove_member" value="{{ m.user_id }}">
+            <button type="submit" class="overflow-menu-btn">✕</button>
+          </form>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+
+  <h3>Invite a member</h3>
+  <form method="post" class="section-card" style="padding:16px;">
+    {% csrf_token %}
+    <input type="hidden" name="invite" value="1">
+    <div class="form-group">
+      <label>Username</label>
+      {{ invite_form.username }}
+    </div>
+    <button type="submit" class="btn block">Invite</button>
+  </form>
+
+  <h3>Public share link</h3>
+  <p class="sub" style="color:var(--text-secondary);font-size:13px;">Anyone with the link can view this group's root folder, plus whatever you allow below.</p>
+  <form method="post" action="{% url 'storage:share_group' group.id %}" class="section-card" style="padding:16px;">
+    {% csrf_token %}
+    <div class="checkbox-row"><input type="checkbox" id="g-perm-upload" name="can_upload"><label for="g-perm-upload">Allow uploading files</label></div>
+    <div class="checkbox-row"><input type="checkbox" id="g-perm-folders" name="can_create_folders"><label for="g-perm-folders">Allow creating folders</label></div>
+    <div class="checkbox-row"><input type="checkbox" id="g-perm-tags" name="can_manage_tags"><label for="g-perm-tags">Allow adding/updating tags</label></div>
+    <button type="submit" class="btn secondary block" style="margin-top:12px;">Create Share Link</button>
+  </form>
+  {% for link in group.share_links.all %}
+    {% if link.is_active and not link.folder_id %}
+      <div class="share-link-row">
+        <div class="share-link-url" id="share-url-{{ link.id }}">{{ request.scheme }}://{{ request.get_host }}{% url 'storage:shared' link.token %}</div>
+        <p class="sub" style="color:var(--text-secondary);font-size:12px;">
+          {% if link.can_upload %}Upload &middot; {% endif %}{% if link.can_create_folders %}Create folders &middot; {% endif %}{% if link.can_manage_tags %}Manage tags{% endif %}
+        </p>
+        <div style="display:flex;gap:8px;margin-top:8px;">
+          <button type="button" class="btn secondary" onclick="copyLink('share-url-{{ link.id }}', this)">Copy Link</button>
+          <form method="post" action="{% url 'storage:revoke_share' link.id %}">
+            {% csrf_token %}
+            <button type="submit" class="btn danger">Revoke</button>
+          </form>
+        </div>
+      </div>
+    {% endif %}
+  {% endfor %}
+
+</div>
+{% endblock %}

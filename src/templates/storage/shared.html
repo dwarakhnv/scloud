@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}Shared - SCloud{% endblock %}
+{% block body %}
+<div class="topbar">
+  <div class="title">{% if folder %}{{ folder.name }}{% elif group %}{{ group.name }}{% else %}Shared{% endif %}</div>
+  <div class="actions">
+    <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme"><span class="theme-toggle-icon">☀️</span></button>
+    <button class="icon-btn" onclick="copyLink('this-share-url', this)" title="Copy link">🔗</button>
+  </div>
+</div>
+<div class="container">
+  <p class="sub" style="color:var(--text-secondary);font-size:13px;">
+    Shared by {{ link.created_by }}
+    {% if not link.can_upload and not link.can_create_folders and not link.can_manage_tags %} &middot; view only{% endif %}
+  </p>
+  <div id="this-share-url" style="display:none;">{{ share_url }}</div>
+
+  {% if link.can_manage_tags %}
+  <div class="tag-chip-row">
+    {% for tag in available_tags %}
+      <span class="tag-chip">{{ tag.name }}</span>
+    {% endfor %}
+    <span class="tag-chip" onclick="sharedCreateTag()">+ New tag</span>
+  </div>
+  {% endif %}
+
+  {% if link.can_create_folders %}
+    <button class="btn secondary" onclick="openModal('modal-shared-folder')" style="margin-bottom:12px;">+ Folder</button>
+  {% endif %}
+
+  {% if not subfolders and not files %}
+    <div class="empty-state"><p>Nothing here yet.</p></div>
+  {% endif %}
+
+  <div class="grid-boxes">
+    {% for f in subfolders %}
+      <div class="box-item folder-box">
+        <div class="box-thumb">📁</div>
+        <div class="box-label">{{ f.name }}</div>
+      </div>
+    {% endfor %}
+    {% for file in files %}
+      <div class="box-item" data-grid-file-id="{{ file.id }}" onclick="openLightbox({{ forloop.counter0 }})">
+        {% if file.get_thumbnail_url %}
+          <div class="box-thumb"><img src="{{ file.get_thumbnail_url }}?share={{ link.token }}" style="width:100%;height:100%;object-fit:cover;" alt="{{ file.filename }}"></div>
+        {% else %}
+          <div class="box-thumb">{% if file.is_video %}🎬{% else %}📄{% endif %}</div>
+        {% endif %}
+        <div class="box-label">{{ file.filename }}</div>
+      </div>
+    {% endfor %}
+  </div>
+</div>
+
+{% if link.can_upload %}
+<label class="fab" for="shared-file-input" title="Upload">
+  +
+  <input id="shared-file-input" type="file" multiple style="display:none" onchange="sharedStartUpload(this)">
+</label>
+<div id="upload-progress" class="progress-bar" style="display:none;position:fixed;left:16px;right:16px;bottom:90px;z-index:40;">
+  <div class="fill"></div>
+</div>
+{% endif %}
+
+{% if link.can_create_folders %}
+<div class="modal-backdrop" id="modal-shared-folder">
+  <div class="modal-sheet">
+    <h3>New Folder</h3>
+    <form method="post" action="{% url 'storage:shared_folder_create' link.token %}">
+      {% csrf_token %}
+      <input type="text" name="name" placeholder="Folder name" required autofocus>
+      <button type="submit" class="btn block">Create</button>
+      <button type="button" class="btn secondary block" style="margin-top:8px;" onclick="closeModal('modal-shared-folder')">Cancel</button>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+<!-- Full-screen media viewer (view-only, no move/delete for anonymous visitors) -->
+<div class="lightbox" id="lightbox">
+  <div class="lightbox-topbar">
+    <button class="lightbox-icon-btn" onclick="closeLightbox()" title="Close">✕</button>
+    <div class="lightbox-title" id="lightbox-title"></div>
+    {% if link.can_manage_tags %}
+      <button class="lightbox-icon-btn" onclick="toggleLightboxMenu()" title="Tags">⋮</button>
+    {% else %}
+      <a class="lightbox-icon-btn" id="lightbox-download-link" download title="Download">⬇</a>
+    {% endif %}
+  </div>
+  <div class="lightbox-stage">
+    <button class="lightbox-nav prev" id="lightbox-prev" onclick="lightboxPrev()">‹</button>
+    <div class="lightbox-media" id="lightbox-media"></div>
+    <button class="lightbox-nav next" id="lightbox-next" onclick="lightboxNext()">›</button>
+  </div>
+  <div class="lightbox-menu" id="lightbox-menu">
+    <div class="lightbox-menu-sheet" id="lightbox-menu-body"></div>
+  </div>
+</div>
+
+{{ files_data|json_script:"files-data" }}
+{{ tags_data|json_script:"tags-data" }}
+<script>
+  window.SCLOUD_FILES = JSON.parse(document.getElementById('files-data').textContent);
+  window.SCLOUD_FOLDERS = [];
+  window.SCLOUD_TAGS = JSON.parse(document.getElementById('tags-data').textContent);
+  window.SCLOUD_SHARE_TOKEN = "{{ link.token }}";
+  window.SCLOUD_SHARE_CAN_MANAGE_TAGS = {{ link.can_manage_tags|yesno:"true,false" }};
+  window.SCLOUD_CHUNK_SIZE = 8 * 1024 * 1024;
+  window.SCLOUD_UPLOAD_URL = "{% url 'storage:shared_upload' link.token %}";
+  window.SCLOUD_UPLOAD_CHUNK_URL = "{% url 'storage:shared_upload_chunk' link.token %}";
+  window.SCLOUD_READ_ONLY_LIGHTBOX = true;
+
+  document.querySelectorAll('.modal-backdrop').forEach(function(el){
+    el.addEventListener('click', function(e){ if (e.target === el) el.classList.remove('open'); });
+  });
+</script>
+{% endblock %}

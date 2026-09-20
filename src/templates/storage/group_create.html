@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}New Group - SCloud{% endblock %}
+{% block body %}
+<div class="topbar">
+  <div class="title">New Group</div>
+  <div class="actions">
+    <a class="icon-btn" href="{% url 'storage:groups_list' %}" title="Back">✕</a>
+  </div>
+</div>
+<div class="container">
+  <form method="post">
+    {% csrf_token %}
+    <div class="form-group">
+      <label>Group name</label>
+      {{ form.name }}
+    </div>
+    <button type="submit" class="btn block">Create Group</button>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Profile - SCloud{% endblock %}
+{% block body %}
+<div class="topbar">
+  <div class="title">Profile</div>
+  <div class="actions">
+    <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme"><span class="theme-toggle-icon">☀️</span></button>
+    <a class="icon-btn" href="{% url 'storage:home' %}" title="Back">✕</a>
+  </div>
+</div>
+<div class="container">
+
+  <h3>Account</h3>
+  <div class="section-card" style="padding:16px;">
+    <p style="color:var(--text-secondary);font-size:13px;margin-top:0;">Username: <strong style="color:var(--text);">{{ user.username }}</strong></p>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="update_profile" value="1">
+      <div class="form-group">
+        <label>Display name</label>
+        {{ profile_form.display_name }}
+      </div>
+      <div class="form-group">
+        <label>Email</label>
+        {{ profile_form.email }}
+      </div>
+      {% if profile_form.errors %}
+        <ul class="messages">{% for field in profile_form %}{% for error in field.errors %}<li class="error">{{ error }}</li>{% endfor %}{% endfor %}</ul>
+      {% endif %}
+      <button type="submit" class="btn block">Save Changes</button>
+    </form>
+  </div>
+
+  <h3>Change Password</h3>
+  <div class="section-card" style="padding:16px;">
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="change_password" value="1">
+      <div class="form-group">
+        <label>Current password</label>
+        {{ password_form.old_password }}
+      </div>
+      <div class="form-group">
+        <label>New password</label>
+        {{ password_form.new_password1 }}
+      </div>
+      <div class="form-group">
+        <label>Confirm new password</label>
+        {{ password_form.new_password2 }}
+      </div>
+      {% if password_form.errors %}
+        <ul class="messages">
+          {% for field in password_form %}{% for error in field.errors %}<li class="error">{{ error }}</li>{% endfor %}{% endfor %}
+          {% for error in password_form.non_field_errors %}<li class="error">{{ error }}</li>{% endfor %}
+        </ul>
+      {% endif %}
+      <button type="submit" class="btn block">Change Password</button>
+    </form>
+  </div>
+
+</div>
+{% endblock %}
