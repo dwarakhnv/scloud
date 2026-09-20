@@ -1,0 +1,14 @@
+.git
+.gitignore
+data/
+config/config.env
+.env
+*.md
+docs/
+.claude/
+__pycache__/
+*.pyc
+.venv/
+venv/
+src/staticfiles/
+src/db.sqlite3

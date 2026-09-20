@@ -9,3 +9,5 @@ data/
 .claude
 config/config.env
 **/migrations/**
+.env
+src/staticfiles/

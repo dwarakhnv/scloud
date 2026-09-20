@@ -1,0 +1,7 @@
+# Force LF line endings for shell scripts regardless of the checkout
+# platform's core.autocrlf setting. A CRLF shebang line (#!/bin/sh<CR><LF>)
+# breaks with "no such file or directory" inside Linux containers, so this
+# matters even though the project is developed on Windows.
+*.sh text eol=lf
+Dockerfile text eol=lf
+docker-compose.yml text eol=lf

@@ -18,7 +18,26 @@ SCloud is a Self-Hosted Cloud for Photo/Video/Media storage (mainly for media)
 - Ability to move files. (should move thumbnail accordingly and update in DB as well.)
 - Store all code under /src/
 
-## Setup
+## Setup (Docker - recommended)
+
+```bash
+git clone https://github.com/dwarakhnv/scloud.git
+cd scloud
+./launch.sh        # Windows: .\launch.ps1
+```
+
+This pulls the latest code, builds the image, and starts the container - which sets up
+`config/config.env` and the database automatically on first boot. Re-run the same command any
+time to update to the latest version. Then, one time only:
+
+```bash
+docker compose exec app python manage.py createsuperuser
+```
+
+Full walkthroughs (Windows, Linux, external drives, backups, running from a portable drive) are in
+[`docs/`](docs/README.md).
+
+## Setup (without Docker)
 
 ```bash
 pip install -r requirements.txt

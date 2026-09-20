@@ -1,0 +1,28 @@
+services:
+  app:
+    build: .
+    image: scloud:latest
+    restart: unless-stopped
+    ports:
+      # Publishes the app on the host so it's reachable at
+      # http://localhost:${SCLOUD_PORT} - point a reverse proxy or a
+      # Cloudflare Tunnel (cloudflared) at that address to expose it publicly.
+      - "${SCLOUD_PORT:-5125}:${SCLOUD_PORT:-5125}"
+    volumes:
+      # Where your actual files/thumbnails/database live. Change
+      # SCLOUD_DATA_DIR in .env to point at an external drive - see
+      # docs/external-drive.md. No image rebuild needed for that.
+      - ${SCLOUD_DATA_DIR:-./data}:/app/data
+      - ${SCLOUD_CONFIG_DIR:-./config}:/app/config
+    environment:
+      # gunicorn inside the container binds to this same port, so changing
+      # SCLOUD_PORT in .env is the one thing you need to touch.
+      - SCLOUD_PORT=${SCLOUD_PORT:-5125}
+      # Optional: create an admin account automatically on first boot.
+      # Set these in a .env file next to this compose file (see .env.example).
+      - DJANGO_SUPERUSER_USERNAME=${DJANGO_SUPERUSER_USERNAME:-}
+      - DJANGO_SUPERUSER_EMAIL=${DJANGO_SUPERUSER_EMAIL:-}
+      - DJANGO_SUPERUSER_PASSWORD=${DJANGO_SUPERUSER_PASSWORD:-}
+      - GUNICORN_WORKERS=${GUNICORN_WORKERS:-4}
+      - GUNICORN_THREADS=${GUNICORN_THREADS:-4}
+      - GUNICORN_TIMEOUT=${GUNICORN_TIMEOUT:-600}
