@@ -11,6 +11,9 @@ urlpatterns = [
     path("my/", views.my_space, name="my_space"),
     path("my/folder/<int:folder_id>/", views.my_space, name="my_space_folder"),
 
+    # Staff-only
+    path("system/overview/", views.system_overview, name="system_overview"),
+
     # Groups
     path("groups/", views.groups_list, name="groups_list"),
     path("groups/new/", views.group_create, name="group_create"),

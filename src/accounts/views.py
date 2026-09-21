@@ -5,6 +5,8 @@ from django.contrib.auth.forms import PasswordChangeForm
 from django.contrib.auth.views import LoginView as DjangoLoginView
 from django.shortcuts import redirect, render
 
+from storage.quotas import get_user_quota
+
 from .forms import ProfileForm
 
 
@@ -39,5 +41,9 @@ def profile(request):
     return render(
         request,
         "accounts/profile.html",
-        {"profile_form": profile_form, "password_form": password_form},
+        {
+            "profile_form": profile_form,
+            "password_form": password_form,
+            "quota": get_user_quota(request.user),
+        },
     )

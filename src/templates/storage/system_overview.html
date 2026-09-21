@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}System Overview - SCloud{% endblock %}
+{% block body %}
+<div class="topbar">
+  <div class="title">System Overview</div>
+  <div class="actions">
+    <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme"><span class="theme-toggle-icon">☀️</span></button>
+    <a class="icon-btn" href="{% url 'admin:index' %}" title="Django admin">🛠</a>
+    <a class="icon-btn" href="{% url 'storage:home' %}" title="Back">✕</a>
+  </div>
+</div>
+<div class="container">
+
+  <h3>Disk space</h3>
+  {% for disk in disks %}
+    <div class="section-card" style="padding:16px;">
+      <p style="margin:0 0 4px;font-weight:600;">{{ disk.label }}</p>
+      <p style="color:var(--text-secondary);font-size:12px;margin:0 0 10px;word-break:break-all;">{{ disk.path }}</p>
+      <p style="color:var(--text-secondary);font-size:13px;margin:0 0 8px;">
+        {{ disk.used|filesizeformat }} used of {{ disk.total|filesizeformat }} ({{ disk.free|filesizeformat }} free)
+      </p>
+      <div class="progress-bar">
+        <div class="fill" style="width:{{ disk.percent }}%;{% if disk.percent >= 90 %}background:var(--danger);{% endif %}"></div>
+      </div>
+      {% if disk.shared_with %}
+        <p style="color:var(--text-secondary);font-size:12px;margin:8px 0 0;">Same physical drive as: {{ disk.shared_with|join:", " }}</p>
+      {% endif %}
+    </div>
+  {% empty %}
+    <div class="empty-state"><p>Could not read disk usage.</p></div>
+  {% endfor %}
+
+  <h3>Users</h3>
+  <div style="overflow-x:auto;">
+    <table class="details-table">
+      <thead>
+        <tr><th>User</th><th>Used</th><th>Limit</th><th>%</th><th>Groups owned</th></tr>
+      </thead>
+      <tbody>
+        {% for row in user_rows %}
+          <tr>
+            <td>
+              {{ row.user.username }}{% if row.user.is_staff %} <span class="tag-chip active" style="cursor:default;padding:2px 8px;">staff</span>{% endif %}
+            </td>
+            <td>{{ row.used_bytes|filesizeformat }}</td>
+            <td>{{ row.limit_gb }} GB</td>
+            <td{% if row.over_limit %} style="color:var(--danger);font-weight:600;"{% endif %}>{{ row.percent }}%</td>
+            <td>{{ row.owned_groups }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p style="color:var(--text-secondary);font-size:12px;margin-top:8px;">
+    Per-user limits are set in the <a href="{% url 'admin:index' %}" style="color:var(--accent);">Django admin</a> (Accounts → Users → Storage quota).
+  </p>
+
+</div>
+{% endblock %}

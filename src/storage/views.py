@@ -8,7 +8,7 @@ from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
-from django.db.models import Case, Count, IntegerField, When
+from django.db.models import Case, Count, IntegerField, Sum, When
 from django.db.models.functions import Coalesce, Lower
 from django.http import HttpResponse, HttpResponseBadRequest, JsonResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -27,6 +27,7 @@ from .forms import (
 from .media_metadata import extract_captured_at
 from .models import Folder, Group, GroupMembership, MediaFile, ShareLink, Tag
 from .permissions import check_file_access, check_folder_access, get_group_or_403, is_group_admin
+from .quotas import get_user_quota
 from .range_response import serve_file_with_range
 from .thumbnails import queue_thumbnail
 
@@ -128,6 +129,19 @@ def _clean_name(raw_name: str) -> str:
     if name in (".", ".."):
         raise ValueError("Invalid name.")
     return name
+
+
+def _check_sibling_folder_name(parent, owner, group, name, exclude_id=None):
+    """Raise ValueError if another folder with this name already exists
+    at the same level (same parent, same owner/group). Case-insensitive,
+    since letting "Photos" and "photos" coexist is exactly the kind of
+    thing that quietly produces duplicate/orphaned folders later."""
+    qs = Folder.objects.filter(parent=parent, name__iexact=name)
+    qs = qs.filter(group=group) if group else qs.filter(owner=owner)
+    if exclude_id:
+        qs = qs.exclude(id=exclude_id)
+    if qs.exists():
+        raise ValueError(f'A folder named "{name}" already exists here.')
 
 
 def _unique_filename(dest_dir: Path, filename: str) -> str:
@@ -251,6 +265,14 @@ def _render_browser(request, space, owner, group, folder):
     files_list = list(files_qs)
     available_tags = _available_tags(space, owner, group)
 
+    if folder:
+        total_size_bytes = folder.total_size_bytes()
+    else:
+        # Viewing the root - "recursive size" is everything in this scope.
+        scope_qs = MediaFile.objects.filter(group=group) if space == "group" \
+            else MediaFile.objects.filter(owner=owner)
+        total_size_bytes = scope_qs.aggregate(total=Sum("size_bytes"))["total"] or 0
+
     context = {
         "space": space,
         "group": group,
@@ -259,6 +281,7 @@ def _render_browser(request, space, owner, group, folder):
         "subfolders": subfolders_list,
         "folder_count": len(subfolders_list),
         "file_count": len(files_list),
+        "total_size_bytes": total_size_bytes,
         "files": files_list,
         "all_folders": all_folders,
         "view_mode": _get_view_mode(request),
@@ -279,6 +302,53 @@ def _render_browser(request, space, owner, group, folder):
 def groups_list(request):
     groups = Group.objects.filter(members=request.user).order_by("name")
     return render(request, "storage/groups_list.html", {"groups": groups})
+
+
+@login_required
+def system_overview(request):
+    if not request.user.is_staff:
+        raise PermissionDenied()
+
+    disks = []
+    for label, path in (
+        ("Media files (DATA_ROOT)", Constants.DATA_ROOT),
+        ("Database (DATABASE_PATH)", Constants.DATABASE_PATH.parent),
+    ):
+        try:
+            usage = shutil.disk_usage(path)
+        except OSError:
+            continue
+        disks.append({
+            "label": label,
+            "path": str(path),
+            "total": usage.total,
+            "used": usage.used,
+            "free": usage.free,
+            "percent": round((usage.used / usage.total) * 100, 1) if usage.total else 0,
+        })
+    # Two different paths often land on the same physical/virtual drive
+    # (e.g. DATA_ROOT and DATABASE_PATH both under the same mount) - flag
+    # that in the template rather than silently showing identical numbers
+    # twice with no explanation.
+    for i, disk in enumerate(disks):
+        disk["shared_with"] = [
+            other["label"] for j, other in enumerate(disks)
+            if j != i and other["total"] == disk["total"] and other["free"] == disk["free"]
+        ]
+
+    user_rows = []
+    for user in User.objects.order_by("username"):
+        quota = get_user_quota(user)
+        user_rows.append({
+            "user": user,
+            "owned_groups": Group.objects.filter(owner=user).count(),
+            **quota,
+        })
+    user_rows.sort(key=lambda r: r["used_bytes"], reverse=True)
+
+    return render(
+        request, "storage/system_overview.html", {"disks": disks, "user_rows": user_rows},
+    )
 
 
 @login_required
@@ -371,6 +441,12 @@ def folder_create(request):
         owner = request.user
         if parent_id:
             parent = get_object_or_404(Folder, id=parent_id, owner=owner)
+
+    try:
+        _check_sibling_folder_name(parent, owner, group, form.cleaned_data["name"])
+    except ValueError as e:
+        messages.error(request, str(e))
+        return redirect(request.META.get("HTTP_REFERER", "/"))
 
     Folder.objects.create(name=form.cleaned_data["name"], parent=parent, owner=owner, group=group)
     messages.success(request, "Folder created.")
@@ -658,6 +734,14 @@ def move_folder(request, folder_id):
                 raise PermissionDenied("Cannot move a folder into itself.")
             node = node.parent
 
+    try:
+        _check_sibling_folder_name(
+            dest_parent, folder.owner, folder.group, folder.name, exclude_id=folder.id
+        )
+    except ValueError as e:
+        messages.error(request, str(e))
+        return redirect(request.META.get("HTTP_REFERER", "/"))
+
     old_path = folder.full_path()
     folder.parent = dest_parent
     folder.save(update_fields=["parent"])
@@ -684,6 +768,13 @@ def rename_folder(request, folder_id):
         return JsonResponse({"error": str(e)}, status=400)
 
     if new_name != folder.name:
+        try:
+            _check_sibling_folder_name(
+                folder.parent, folder.owner, folder.group, new_name, exclude_id=folder.id
+            )
+        except ValueError as e:
+            return JsonResponse({"error": str(e)}, status=400)
+
         # Folder.relative_path()/full_path() are derived live from `name`, so
         # every descendant folder and file automatically resolves to the new
         # path once this save() commits - nothing else in the DB needs to
@@ -1051,6 +1142,15 @@ def shared_view(request, token, folder_id=None):
     space = "group" if group else "my"
     tags = _available_tags(space, owner, group)
 
+    if current_folder:
+        total_size_bytes = current_folder.total_size_bytes()
+    elif group:
+        total_size_bytes = MediaFile.objects.filter(group=group).aggregate(
+            total=Sum("size_bytes")
+        )["total"] or 0
+    else:
+        total_size_bytes = 0
+
     return render(
         request,
         "storage/shared.html",
@@ -1060,6 +1160,7 @@ def shared_view(request, token, folder_id=None):
             "subfolders": subfolders_list,
             "folder_count": len(subfolders_list),
             "file_count": len(files),
+            "total_size_bytes": total_size_bytes,
             "files": files, "sort_mode": sort_mode, "available_tags": tags,
             "files_data": [_serialize_file(f) for f in files],
             "tags_data": [{"id": t.id, "name": t.name} for t in tags],
@@ -1126,8 +1227,13 @@ def shared_folder_create(request, token):
     if not form.is_valid():
         messages.error(request, "Please provide a folder name.")
     else:
-        Folder.objects.create(name=form.cleaned_data["name"], parent=parent, owner=owner, group=group)
-        messages.success(request, "Folder created.")
+        try:
+            _check_sibling_folder_name(parent, owner, group, form.cleaned_data["name"])
+        except ValueError as e:
+            messages.error(request, str(e))
+        else:
+            Folder.objects.create(name=form.cleaned_data["name"], parent=parent, owner=owner, group=group)
+            messages.success(request, "Folder created.")
 
     if parent:
         return redirect("storage:shared_folder", token=token, folder_id=parent.id)
@@ -1177,6 +1283,13 @@ def shared_rename_folder(request, token, folder_id):
         return JsonResponse({"error": str(e)}, status=400)
 
     if new_name != folder.name:
+        try:
+            _check_sibling_folder_name(
+                folder.parent, folder.owner, folder.group, new_name, exclude_id=folder.id
+            )
+        except ValueError as e:
+            return JsonResponse({"error": str(e)}, status=400)
+
         old_path = folder.full_path()
         prospective_path = old_path.parent / new_name
         if prospective_path != old_path and prospective_path.exists():

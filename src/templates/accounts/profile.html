@@ -5,10 +5,26 @@
   <div class="title">Profile</div>
   <div class="actions">
     <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme"><span class="theme-toggle-icon">☀️</span></button>
+    {% if user.is_staff %}
+      <a class="icon-btn" href="{% url 'storage:system_overview' %}" title="System overview">📊</a>
+      <a class="icon-btn" href="{% url 'admin:index' %}" title="Django admin">🛠</a>
+    {% endif %}
     <a class="icon-btn" href="{% url 'storage:home' %}" title="Back">✕</a>
   </div>
 </div>
 <div class="container">
+
+  <h3>Storage</h3>
+  <div class="section-card" style="padding:16px;">
+    <p style="color:var(--text-secondary);font-size:13px;margin:0 0 10px;">
+      {{ quota.used_bytes|filesizeformat }} used of {{ quota.limit_bytes|filesizeformat }}
+      {% if quota.over_limit %}<span style="color:var(--danger);font-weight:600;">&middot; over limit</span>{% endif %}
+    </p>
+    <div class="progress-bar">
+      <div class="fill" style="width:{{ quota.percent }}%;{% if quota.over_limit %}background:var(--danger);{% endif %}"></div>
+    </div>
+    <p style="color:var(--text-secondary);font-size:12px;margin:8px 0 0;">Counts your My Media files plus any groups you created. Contact an admin to change your limit.</p>
+  </div>
 
   <h3>Account</h3>
   <div class="section-card" style="padding:16px;">

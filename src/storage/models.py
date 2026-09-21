@@ -115,6 +115,14 @@ class Folder(models.Model):
             ids.extend(child.subtree_ids())
         return ids
 
+    def total_size_bytes(self) -> int:
+        """Combined size of every file in this folder and all of its
+        descendants, recursively."""
+        result = MediaFile.objects.filter(folder_id__in=self.subtree_ids()).aggregate(
+            total=models.Sum("size_bytes")
+        )
+        return result["total"] or 0
+
 
 class Tag(models.Model):
     """A tag, scoped to either a user's My Space or a Group."""

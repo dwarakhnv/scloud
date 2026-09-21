@@ -9,6 +9,10 @@
     {% if group %}
       <a class="icon-btn" href="{% url 'storage:group_manage' group.id %}" title="Manage members">👥</a>
     {% endif %}
+    {% if user.is_staff %}
+      <a class="icon-btn" href="{% url 'storage:system_overview' %}" title="System overview">📊</a>
+      <a class="icon-btn" href="{% url 'admin:index' %}" title="Django admin">🛠</a>
+    {% endif %}
     <a class="icon-btn" href="{% url 'accounts:profile' %}" title="Profile">👤</a>
     <a class="icon-btn" href="{% url 'accounts:logout' %}" title="Sign out" onclick="return confirmLogout(this.href);">⏏</a>
   </div>
@@ -37,7 +41,7 @@
     {% endfor %}
   </div>
 
-  <div class="item-count-row">{{ folder_count }} folder{{ folder_count|pluralize }} &middot; {{ file_count }} file{{ file_count|pluralize }}</div>
+  <div class="item-count-row">{{ folder_count }} folder{{ folder_count|pluralize }} &middot; {{ file_count }} file{{ file_count|pluralize }} &middot; {{ total_size_bytes|filesizeformat }}</div>
 
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
     <div class="view-switch">
