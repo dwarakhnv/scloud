@@ -16,6 +16,15 @@ Constants.ensure_dirs()
 SECRET_KEY = Constants.SECRET_KEY
 DEBUG = Constants.DEBUG
 ALLOWED_HOSTS = Constants.ALLOWED_HOSTS
+CSRF_TRUSTED_ORIGINS = Constants.CSRF_TRUSTED_ORIGINS
+
+if Constants.BEHIND_PROXY:
+    # Trust X-Forwarded-Proto from the reverse proxy/tunnel in front of us so
+    # request.is_secure() (and therefore secure cookies, CSRF's same-origin
+    # check, etc.) work correctly when Django itself only ever sees plain
+    # HTTP from that proxy.
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    USE_X_FORWARDED_HOST = True
 
 
 # Application definition

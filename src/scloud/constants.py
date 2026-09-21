@@ -70,6 +70,26 @@ class Constants:
     SECRET_KEY = _get("SECRET_KEY", "insecure-dev-key-change-me")
     DEBUG = str(_get("DEBUG", "True")).strip().lower() in ("1", "true", "yes", "on")
     ALLOWED_HOSTS = [h.strip() for h in str(_get("ALLOWED_HOSTS", "*")).split(",") if h.strip()]
+
+    # Django 4+ checks the Origin header on unsafe (POST/PUT/...) requests
+    # against this list, SEPARATELY from ALLOWED_HOSTS - a wildcard
+    # ALLOWED_HOSTS does NOT cover this. Anyone serving the site on a real
+    # domain (directly, behind nginx, or through a tunnel like cloudflared)
+    # must list it here, scheme included, e.g.
+    # CSRF_TRUSTED_ORIGINS=https://aeoncloud.online,https://www.aeoncloud.online
+    # Leaving this unset is exactly what causes "CSRF verification failed"
+    # on login for anyone reachable via a domain rather than bare localhost.
+    CSRF_TRUSTED_ORIGINS = [
+        o.strip() for o in str(_get("CSRF_TRUSTED_ORIGINS", "")).split(",") if o.strip()
+    ]
+
+    # Set to True (the default) when running behind a reverse proxy or
+    # tunnel that terminates TLS and forwards plain HTTP to this container
+    # (nginx, Cloudflare Tunnel, etc.) - tells Django to trust the
+    # X-Forwarded-Proto header so it knows the original request was HTTPS.
+    # Only disable this if the app is reachable directly with no proxy in
+    # front of it at all.
+    BEHIND_PROXY = str(_get("BEHIND_PROXY", "True")).strip().lower() in ("1", "true", "yes", "on")
     MAX_UPLOAD_SIZE_MB = int(_get("MAX_UPLOAD_SIZE_MB", 10240))  # 10 GB default
     MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024
 
