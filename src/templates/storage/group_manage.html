@@ -57,7 +57,9 @@
     {% csrf_token %}
     <div class="checkbox-row"><input type="checkbox" id="g-perm-upload" name="can_upload"><label for="g-perm-upload">Allow uploading files</label></div>
     <div class="checkbox-row"><input type="checkbox" id="g-perm-folders" name="can_create_folders"><label for="g-perm-folders">Allow creating folders</label></div>
+    <div class="checkbox-row"><input type="checkbox" id="g-perm-delete-folders" name="can_delete_folders"><label for="g-perm-delete-folders">Allow deleting folders</label></div>
     <div class="checkbox-row"><input type="checkbox" id="g-perm-tags" name="can_manage_tags"><label for="g-perm-tags">Allow adding/updating tags</label></div>
+    <p class="sub" style="color:var(--text-secondary);font-size:12px;margin-top:4px;">Sharing includes every subfolder in this group too.</p>
     <button type="submit" class="btn secondary block" style="margin-top:12px;">Create Share Link</button>
   </form>
   {% for link in group.share_links.all %}
@@ -65,7 +67,7 @@
       <div class="share-link-row">
         <div class="share-link-url" id="share-url-{{ link.id }}">{{ request.scheme }}://{{ request.get_host }}{% url 'storage:shared' link.token %}</div>
         <p class="sub" style="color:var(--text-secondary);font-size:12px;">
-          {% if link.can_upload %}Upload &middot; {% endif %}{% if link.can_create_folders %}Create folders &middot; {% endif %}{% if link.can_manage_tags %}Manage tags{% endif %}
+          {% if link.can_upload %}Upload &middot; {% endif %}{% if link.can_create_folders %}Create folders &middot; {% endif %}{% if link.can_delete_folders %}Delete folders &middot; {% endif %}{% if link.can_manage_tags %}Manage tags{% endif %}
         </p>
         <div style="display:flex;gap:8px;margin-top:8px;">
           <button type="button" class="btn secondary" onclick="copyLink('share-url-{{ link.id }}', this)">Copy Link</button>
@@ -79,4 +81,7 @@
   {% endfor %}
 
 </div>
+<script>
+  handleCopiedShareParam();
+</script>
 {% endblock %}

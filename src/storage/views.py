@@ -7,6 +7,7 @@ from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
+from django.db.models import Case, Count, IntegerField, When
 from django.db.models.functions import Coalesce, Lower
 from django.http import HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -30,7 +31,7 @@ from .thumbnails import queue_thumbnail
 User = get_user_model()
 
 VIEW_MODES = ("boxes", "list", "details")
-SORT_MODES = ("name", "captured", "uploaded")
+SORT_MODES = ("name", "captured", "uploaded", "type", "size_asc", "size_desc")
 
 
 # --------------------------------------------------------------------------
@@ -60,6 +61,21 @@ def _apply_sort(files_qs, sort_mode):
         return files_qs.annotate(_sort_date=Coalesce("captured_at", "uploaded_at")).order_by(
             "-_sort_date"
         )
+    if sort_mode == "type":
+        # Group images, then videos, then everything else; alphabetical within each group.
+        return files_qs.annotate(
+            _sort_type=Case(
+                When(is_image=True, then=0),
+                When(is_video=True, then=1),
+                default=2,
+                output_field=IntegerField(),
+            ),
+            _sort_name=Lower("filename"),
+        ).order_by("_sort_type", "_sort_name")
+    if sort_mode == "size_asc":
+        return files_qs.order_by("size_bytes")
+    if sort_mode == "size_desc":
+        return files_qs.order_by("-size_bytes")
     return files_qs.order_by("-uploaded_at")
 
 
@@ -195,8 +211,12 @@ def _render_browser(request, space, owner, group, folder):
     sort_mode = _get_sort_mode(request)
     files_qs = _apply_sort(files_qs.prefetch_related("tags"), sort_mode)
     # Folders always sort by name, and are always listed ahead of files
-    # (handled by the template rendering subfolders before files).
-    subfolders_qs = subfolders_qs.order_by("name")
+    # (handled by the template rendering subfolders before files). Annotate
+    # each with whether it's empty so the UI can skip the "are you sure?"
+    # confirmation when deleting an empty folder.
+    subfolders_qs = subfolders_qs.annotate(
+        child_count=Count("children", distinct=True), file_count=Count("files", distinct=True),
+    ).order_by("name")
 
     if space == "group":
         all_folders = Folder.objects.filter(group=group).order_by("name")
@@ -463,12 +483,9 @@ def _authorize_media_access(request, media_file):
     covers this file's folder/group."""
     token = request.GET.get("share")
     if token:
-        link = ShareLink.objects.filter(token=token, is_active=True).first()
-        if link and link.is_valid():
-            if link.folder_id and media_file.folder_id == link.folder_id:
-                return
-            if link.group_id and media_file.group_id == link.group_id and not link.folder_id:
-                return
+        link = ShareLink.objects.filter(token=token).first()
+        if link and link.is_valid() and _media_file_in_share_scope(link, media_file):
+            return
         raise PermissionDenied("Invalid or expired share link.")
 
     if not request.user.is_authenticated:
@@ -649,6 +666,40 @@ def delete_file(request, file_id):
     return redirect(request.META.get("HTTP_REFERER", "/"))
 
 
+def _delete_folder_and_contents(folder):
+    """Recursively delete a folder: every file inside it or any descendant
+    folder is removed from disk, then the folder itself is deleted (which
+    cascades to remove the Folder/MediaFile rows in the DB)."""
+    subtree_ids = folder.subtree_ids()
+    for media_file in MediaFile.objects.filter(folder_id__in=subtree_ids):
+        path = media_file.disk_path()
+        if path.exists():
+            path.unlink()
+        thumb_path = media_file.thumbnail_disk_path()
+        if thumb_path and thumb_path.exists():
+            thumb_path.unlink()
+
+    disk_path = folder.full_path()
+    if disk_path.exists():
+        shutil.rmtree(disk_path, ignore_errors=True)
+
+    folder.delete()
+
+
+@login_required
+@require_POST
+def delete_folder(request, folder_id):
+    folder = get_object_or_404(Folder, id=folder_id)
+    check_folder_access(request.user, folder)
+    name = folder.name
+    _delete_folder_and_contents(folder)
+
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return JsonResponse({"ok": True})
+    messages.success(request, f"Deleted folder '{name}'.")
+    return redirect(request.META.get("HTTP_REFERER", "/"))
+
+
 # --------------------------------------------------------------------------
 # Public share links
 # --------------------------------------------------------------------------
@@ -660,6 +711,7 @@ def _share_permission_kwargs(request):
         "can_upload": form.cleaned_data.get("can_upload", False),
         "can_create_folders": form.cleaned_data.get("can_create_folders", False),
         "can_manage_tags": form.cleaned_data.get("can_manage_tags", False),
+        "can_delete_folders": form.cleaned_data.get("can_delete_folders", False),
     }
 
 
@@ -668,21 +720,30 @@ def _share_permission_kwargs(request):
 def share_folder(request, folder_id):
     folder = get_object_or_404(Folder, id=folder_id)
     check_folder_access(request.user, folder)
-    ShareLink.objects.create(
+    link = ShareLink.objects.create(
         created_by=request.user, folder=folder, group=folder.group,
         **_share_permission_kwargs(request),
     )
     messages.success(request, "Share link created.")
-    return redirect(request.META.get("HTTP_REFERER", "/"))
+    return _redirect_with_copy(request.META.get("HTTP_REFERER", "/"), link)
 
 
 @login_required
 @require_POST
 def share_group(request, group_id):
     group = get_group_or_403(request.user, group_id)
-    ShareLink.objects.create(created_by=request.user, group=group, **_share_permission_kwargs(request))
+    link = ShareLink.objects.create(created_by=request.user, group=group, **_share_permission_kwargs(request))
     messages.success(request, "Share link created.")
-    return redirect("storage:group_manage", group_id=group.id)
+    return _redirect_with_copy(
+        redirect("storage:group_manage", group_id=group.id).url, link,
+    )
+
+
+def _redirect_with_copy(url, link):
+    """Redirect back with a marker telling the page's JS to auto-copy the
+    freshly created share link to the clipboard."""
+    separator = "&" if "?" in url else "?"
+    return redirect(f"{url}{separator}copied_share={link.id}")
 
 
 def _get_valid_link(token):
@@ -693,29 +754,78 @@ def _get_valid_link(token):
 
 
 def _share_scope(link):
-    """Return (owner, group, folder) describing what a share link exposes."""
+    """Return (owner, group, root_folder) describing what a share link exposes."""
     folder = link.folder
     group = link.group
     owner = folder.owner if (folder and folder.owner_id) else None
     return owner, group, folder
 
 
+def _resolve_shared_folder(link, folder_id):
+    """Validate that `folder_id` (if given) is actually within this share
+    link's scope - either the shared folder itself or nested somewhere below
+    it, or (for a whole-group share) anywhere in that group - and return it.
+    Returns the link's root folder (possibly None, meaning the group root)
+    when no folder_id is given. Raises PermissionDenied otherwise. This is
+    what makes sharing recursive: a link to a folder implicitly shares
+    everything nested inside it too."""
+    root_folder, group = link.folder, link.group
+
+    if not folder_id:
+        return root_folder
+
+    folder = get_object_or_404(Folder, id=folder_id)
+    if root_folder:
+        if not folder.is_within(root_folder):
+            raise PermissionDenied("That folder is outside this share link.")
+    elif group:
+        if folder.group_id != group.id:
+            raise PermissionDenied("That folder is outside this share link.")
+    else:
+        raise PermissionDenied()
+    return folder
+
+
+def _media_file_in_share_scope(link, media_file) -> bool:
+    if link.folder_id:
+        return bool(media_file.folder_id) and media_file.folder.is_within(link.folder)
+    if link.group_id:
+        return media_file.group_id == link.group_id
+    return False
+
+
+def _shared_breadcrumbs(link, current_folder):
+    """Breadcrumb chain for the shared view - starts at the shared folder
+    itself (or the group root), never showing private ancestors above it."""
+    if not current_folder:
+        return []
+    chain = current_folder.path_parts()
+    if link.folder_id:
+        for i, node in enumerate(chain):
+            if node.id == link.folder_id:
+                return chain[i:]
+    return chain
+
+
 @ensure_csrf_cookie
-def shared_view(request, token):
+def shared_view(request, token, folder_id=None):
     link = _get_valid_link(token)
     if not link:
         return render(request, "storage/share_expired.html", status=410)
 
-    owner, group, folder = _share_scope(link)
+    owner, group, root_folder = _share_scope(link)
+    current_folder = _resolve_shared_folder(link, folder_id)
 
-    if folder:
-        subfolders = Folder.objects.filter(parent=folder).order_by("name")
-        files = MediaFile.objects.filter(folder=folder)
+    subfolders_qs = Folder.objects.filter(parent=current_folder).annotate(
+        child_count=Count("children", distinct=True), file_count=Count("files", distinct=True),
+    ).order_by("name")
+
+    if current_folder:
+        files = MediaFile.objects.filter(folder=current_folder)
     elif group:
-        subfolders = Folder.objects.filter(group=group, parent=None).order_by("name")
         files = MediaFile.objects.filter(group=group, folder=None)
     else:
-        subfolders, files = [], MediaFile.objects.none()
+        files = MediaFile.objects.none()
 
     sort_mode = _get_sort_mode(request)
     files = list(_apply_sort(files.prefetch_related("tags"), sort_mode))
@@ -727,7 +837,9 @@ def shared_view(request, token):
         request,
         "storage/shared.html",
         {
-            "link": link, "folder": folder, "group": group, "subfolders": subfolders,
+            "link": link, "folder": current_folder, "group": group,
+            "breadcrumbs": _shared_breadcrumbs(link, current_folder),
+            "subfolders": subfolders_qs,
             "files": files, "sort_mode": sort_mode, "available_tags": tags,
             "files_data": [_serialize_file(f) for f in files],
             "tags_data": [{"id": t.id, "name": t.name} for t in tags],
@@ -742,7 +854,8 @@ def shared_upload(request, token):
     if not link or not link.can_upload:
         raise PermissionDenied("Uploads are not allowed on this link.")
 
-    owner, group, folder = _share_scope(link)
+    owner, group, _ = _share_scope(link)
+    folder = _resolve_shared_folder(link, request.POST.get("folder_id"))
     files = request.FILES.getlist("files")
     if not files:
         return HttpResponseBadRequest("No files provided.")
@@ -776,7 +889,8 @@ def shared_upload_chunk(request, token):
     link = _get_valid_link(token)
     if not link or not link.can_upload:
         raise PermissionDenied("Uploads are not allowed on this link.")
-    owner, group, folder = _share_scope(link)
+    owner, group, _ = _share_scope(link)
+    folder = _resolve_shared_folder(link, request.POST.get("folder_id"))
     return _handle_chunk(request, owner=owner, group=group, folder=folder, uploaded_by=link.created_by)
 
 
@@ -786,14 +900,42 @@ def shared_folder_create(request, token):
     if not link or not link.can_create_folders:
         raise PermissionDenied("Creating folders is not allowed on this link.")
 
-    owner, group, folder = _share_scope(link)
+    owner, group, _ = _share_scope(link)
+    parent = _resolve_shared_folder(link, request.POST.get("folder_id"))
     form = FolderCreateForm(request.POST)
     if not form.is_valid():
         messages.error(request, "Please provide a folder name.")
-        return redirect("storage:shared", token=token)
+    else:
+        Folder.objects.create(name=form.cleaned_data["name"], parent=parent, owner=owner, group=group)
+        messages.success(request, "Folder created.")
 
-    Folder.objects.create(name=form.cleaned_data["name"], parent=folder, owner=owner, group=group)
-    messages.success(request, "Folder created.")
+    if parent:
+        return redirect("storage:shared_folder", token=token, folder_id=parent.id)
+    return redirect("storage:shared", token=token)
+
+
+@require_POST
+def shared_delete_folder(request, token, folder_id):
+    link = _get_valid_link(token)
+    if not link or not link.can_delete_folders:
+        raise PermissionDenied("Deleting folders is not allowed on this link.")
+
+    folder = _resolve_shared_folder(link, folder_id)
+    if not folder:
+        raise PermissionDenied()
+    # Never allow deleting the share's own root folder out from under it.
+    if link.folder_id and folder.id == link.folder_id:
+        raise PermissionDenied("Cannot delete the shared folder itself.")
+
+    parent_id = folder.parent_id
+    name = folder.name
+    _delete_folder_and_contents(folder)
+
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return JsonResponse({"ok": True})
+    messages.success(request, f"Deleted folder '{name}'.")
+    if parent_id:
+        return redirect("storage:shared_folder", token=token, folder_id=parent_id)
     return redirect("storage:shared", token=token)
 
 
@@ -803,7 +945,7 @@ def shared_tag_create(request, token):
     if not link or not link.can_manage_tags:
         raise PermissionDenied("Managing tags is not allowed on this link.")
 
-    owner, group, folder = _share_scope(link)
+    owner, group, _ = _share_scope(link)
     form = TagCreateForm(request.POST)
     if not form.is_valid():
         return JsonResponse({"error": "Invalid tag name."}, status=400)
@@ -822,12 +964,8 @@ def shared_tag_toggle(request, token, file_id):
     if not link or not link.can_manage_tags:
         raise PermissionDenied("Managing tags is not allowed on this link.")
 
-    owner, group, folder = _share_scope(link)
     media_file = get_object_or_404(MediaFile, id=file_id)
-    # Confirm the file is actually within this link's scope.
-    if folder and media_file.folder_id != folder.id:
-        raise PermissionDenied()
-    if not folder and (not group or media_file.group_id != group.id or media_file.folder_id):
+    if not _media_file_in_share_scope(link, media_file):
         raise PermissionDenied()
 
     tag_id = request.POST.get("tag_id")

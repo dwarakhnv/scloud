@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Shared - SCloud{% endblock %}
+{% block title %}{% if folder %}{{ folder.name }}{% elif group %}{{ group.name }}{% else %}Shared{% endif %} - SCloud{% endblock %}
 {% block body %}
 <div class="topbar">
   <div class="title">{% if folder %}{{ folder.name }}{% elif group %}{{ group.name }}{% else %}Shared{% endif %}</div>
@@ -11,9 +11,37 @@
 <div class="container">
   <p class="sub" style="color:var(--text-secondary);font-size:13px;">
     Shared by {{ link.created_by }}
-    {% if not link.can_upload and not link.can_create_folders and not link.can_manage_tags %} &middot; view only{% endif %}
+    {% if not link.can_upload and not link.can_create_folders and not link.can_delete_folders and not link.can_manage_tags %} &middot; view only{% endif %}
   </p>
   <div id="this-share-url" style="display:none;">{{ share_url }}</div>
+
+  <div class="breadcrumbs">
+    {% if link.folder_id %}
+      {% for part in breadcrumbs %}
+        {% if not forloop.first %}&rsaquo;{% endif %}
+        <a href="{% url 'storage:shared_folder' link.token part.id %}">{{ part.name }}</a>
+      {% endfor %}
+    {% else %}
+      <a href="{% url 'storage:shared' link.token %}">{{ group.name }}</a>
+      {% for part in breadcrumbs %}
+        &rsaquo; <a href="{% url 'storage:shared_folder' link.token part.id %}">{{ part.name }}</a>
+      {% endfor %}
+    {% endif %}
+  </div>
+
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+    <select onchange="goSharedSort(this.value)" title="Sort by">
+      <option value="uploaded" {% if sort_mode == 'uploaded' %}selected{% endif %}>Upload date</option>
+      <option value="captured" {% if sort_mode == 'captured' %}selected{% endif %}>Media date</option>
+      <option value="name" {% if sort_mode == 'name' %}selected{% endif %}>File name</option>
+      <option value="type" {% if sort_mode == 'type' %}selected{% endif %}>File type</option>
+      <option value="size_desc" {% if sort_mode == 'size_desc' %}selected{% endif %}>File size (largest first)</option>
+      <option value="size_asc" {% if sort_mode == 'size_asc' %}selected{% endif %}>File size (smallest first)</option>
+    </select>
+    {% if link.can_create_folders %}
+      <button class="btn secondary" onclick="openModal('modal-shared-folder')">+ Folder</button>
+    {% endif %}
+  </div>
 
   {% if link.can_manage_tags %}
   <div class="tag-chip-row">
@@ -24,17 +52,17 @@
   </div>
   {% endif %}
 
-  {% if link.can_create_folders %}
-    <button class="btn secondary" onclick="openModal('modal-shared-folder')" style="margin-bottom:12px;">+ Folder</button>
-  {% endif %}
-
   {% if not subfolders and not files %}
     <div class="empty-state"><p>Nothing here yet.</p></div>
   {% endif %}
 
   <div class="grid-boxes">
     {% for f in subfolders %}
-      <div class="box-item folder-box">
+      <div class="box-item folder-box" onclick="window.location='{% url 'storage:shared_folder' link.token f.id %}'">
+        {% if link.can_delete_folders %}
+          <button type="button" class="folder-delete-btn" title="Delete folder"
+                  onclick="event.stopPropagation();sharedDeleteFolder('{{ f.name|escapejs }}', {% if f.child_count == 0 and f.file_count == 0 %}true{% else %}false{% endif %}, '{% url 'storage:shared_delete_folder' link.token f.id %}')">🗑</button>
+        {% endif %}
         <div class="box-thumb">📁</div>
         <div class="box-label">{{ f.name }}</div>
       </div>
@@ -68,6 +96,7 @@
     <h3>New Folder</h3>
     <form method="post" action="{% url 'storage:shared_folder_create' link.token %}">
       {% csrf_token %}
+      <input type="hidden" name="folder_id" value="{{ folder.id|default:'' }}">
       <input type="text" name="name" placeholder="Folder name" required autofocus>
       <button type="submit" class="btn block">Create</button>
       <button type="button" class="btn secondary block" style="margin-top:8px;" onclick="closeModal('modal-shared-folder')">Cancel</button>
@@ -108,7 +137,15 @@
   window.SCLOUD_CHUNK_SIZE = 8 * 1024 * 1024;
   window.SCLOUD_UPLOAD_URL = "{% url 'storage:shared_upload' link.token %}";
   window.SCLOUD_UPLOAD_CHUNK_URL = "{% url 'storage:shared_upload_chunk' link.token %}";
+  window.SCLOUD_CURRENT_FOLDER_ID = "{{ folder.id|default:'' }}";
   window.SCLOUD_READ_ONLY_LIGHTBOX = true;
+
+  function goSharedSort(mode) {
+    var path = window.SCLOUD_CURRENT_FOLDER_ID
+      ? '/s/{{ link.token }}/folder/' + window.SCLOUD_CURRENT_FOLDER_ID + '/'
+      : '/s/{{ link.token }}/';
+    window.location = path + '?sort=' + mode;
+  }
 
   document.querySelectorAll('.modal-backdrop').forEach(function(el){
     el.addEventListener('click', function(e){ if (e.target === el) el.classList.remove('open'); });

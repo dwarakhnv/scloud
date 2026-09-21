@@ -86,6 +86,40 @@ function fallbackCopy(text, done) {
   if (done) done();
 }
 
+function showToast(message) {
+  let toast = document.getElementById('scloud-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'scloud-toast';
+    toast.className = 'toast';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = message;
+  toast.classList.add('open');
+  clearTimeout(toast._hideTimer);
+  toast._hideTimer = setTimeout(() => toast.classList.remove('open'), 2500);
+}
+
+// After creating a share link, the server redirects back here with
+// ?copied_share=<id> - auto-copy that link to the clipboard so the person
+// doesn't have to hunt for a "Copy" button right after creating it.
+function handleCopiedShareParam(beforeCopy) {
+  const params = new URLSearchParams(window.location.search);
+  const copiedId = params.get('copied_share');
+  if (!copiedId) return;
+
+  if (beforeCopy) beforeCopy();
+  const elementId = `share-url-${copiedId}`;
+  if (document.getElementById(elementId)) {
+    copyLink(elementId, null);
+    showToast('Share link copied to clipboard!');
+  }
+
+  params.delete('copied_share');
+  const query = params.toString();
+  history.replaceState({}, '', window.location.pathname + (query ? `?${query}` : ''));
+}
+
 // ---------------------------------------------------------------------
 // Upload - chunked, resumable-per-chunk, so a dropped mobile connection
 // only has to retry one small piece instead of restarting a multi-GB file.
@@ -102,6 +136,7 @@ function startUpload(input, space, groupId, folderId) {
 
 function sharedStartUpload(input) {
   uploadFileList(Array.from(input.files), {
+    folderId: window.SCLOUD_CURRENT_FOLDER_ID || '',
     uploadUrl: window.SCLOUD_UPLOAD_URL,
     chunkUrl: window.SCLOUD_UPLOAD_CHUNK_URL,
   });
@@ -286,6 +321,26 @@ function submitMove(formId) {
 }
 
 // ---------------------------------------------------------------------
+// Folder deletion
+// ---------------------------------------------------------------------
+// Empty folders delete immediately with no confirmation (nothing to lose);
+// non-empty ones ask first since it recursively removes everything inside.
+
+function deleteFolder(name, isEmpty, url) {
+  if (!isEmpty && !confirm(`Delete "${name}" and everything inside it? This cannot be undone.`)) {
+    return;
+  }
+  fetch(url, {
+    method: 'POST',
+    headers: { 'X-CSRFToken': csrftoken, 'X-Requested-With': 'XMLHttpRequest' },
+  }).then(() => window.location.reload());
+}
+
+function sharedDeleteFolder(name, isEmpty, url) {
+  deleteFolder(name, isEmpty, url);
+}
+
+// ---------------------------------------------------------------------
 // Thumbnail polling
 // ---------------------------------------------------------------------
 
@@ -355,6 +410,13 @@ function toggleSelect(fileId, el) {
 function updateSelectCount() {
   const el = document.getElementById('select-count');
   if (el) el.textContent = `${selectedIds.size} selected`;
+}
+
+function selectAll() {
+  if (!selectMode) toggleSelectMode();
+  (window.SCLOUD_FILES || []).forEach((f) => selectedIds.add(f.id));
+  document.querySelectorAll('.select-check').forEach((el) => el.classList.add('checked'));
+  updateSelectCount();
 }
 
 function handleItemClick(e, index, fileId) {

@@ -48,6 +48,9 @@
         <option value="uploaded" {% if sort_mode == 'uploaded' %}selected{% endif %}>Upload date</option>
         <option value="captured" {% if sort_mode == 'captured' %}selected{% endif %}>Media date</option>
         <option value="name" {% if sort_mode == 'name' %}selected{% endif %}>File name</option>
+        <option value="type" {% if sort_mode == 'type' %}selected{% endif %}>File type</option>
+        <option value="size_desc" {% if sort_mode == 'size_desc' %}selected{% endif %}>File size (largest first)</option>
+        <option value="size_asc" {% if sort_mode == 'size_asc' %}selected{% endif %}>File size (smallest first)</option>
       </select>
       <button class="btn secondary" id="select-toggle-btn" onclick="toggleSelectMode()">Select</button>
       {% if folder %}
@@ -76,10 +79,12 @@
   {% if view_mode == 'boxes' %}
     <div class="grid-boxes">
       {% for f in subfolders %}
-        <a class="box-item folder-box" href="{% if space == 'group' %}{% url 'storage:group_folder' group.id f.id %}{% else %}{% url 'storage:my_space_folder' f.id %}{% endif %}">
+        <div class="box-item folder-box" onclick="window.location='{% if space == 'group' %}{% url 'storage:group_folder' group.id f.id %}{% else %}{% url 'storage:my_space_folder' f.id %}{% endif %}'">
+          <button type="button" class="folder-delete-btn" title="Delete folder"
+                  onclick="event.stopPropagation();deleteFolder('{{ f.name|escapejs }}', {% if f.child_count == 0 and f.file_count == 0 %}true{% else %}false{% endif %}, '{% url 'storage:delete_folder' f.id %}')">🗑</button>
           <div class="box-thumb">📁</div>
           <div class="box-label">{{ f.name }}</div>
-        </a>
+        </div>
       {% endfor %}
       {% for file in files %}
         <div class="box-item selectable-item" data-grid-file-id="{{ file.id }}" data-file-id="{{ file.id }}" onclick="handleItemClick(event, {{ forloop.counter0 }}, {{ file.id }})">
@@ -98,10 +103,12 @@
   {% elif view_mode == 'list' %}
     <div class="section-card">
       {% for f in subfolders %}
-        <a class="list-row" href="{% if space == 'group' %}{% url 'storage:group_folder' group.id f.id %}{% else %}{% url 'storage:my_space_folder' f.id %}{% endif %}">
+        <div class="list-row" onclick="window.location='{% if space == 'group' %}{% url 'storage:group_folder' group.id f.id %}{% else %}{% url 'storage:my_space_folder' f.id %}{% endif %}'" style="cursor:pointer;">
           <div class="list-thumb">📁</div>
           <div class="meta"><div class="name">{{ f.name }}</div><div class="sub">Folder</div></div>
-        </a>
+          <button type="button" class="overflow-menu-btn" title="Delete folder"
+                  onclick="event.stopPropagation();deleteFolder('{{ f.name|escapejs }}', {% if f.child_count == 0 and f.file_count == 0 %}true{% else %}false{% endif %}, '{% url 'storage:delete_folder' f.id %}')">🗑</button>
+        </div>
       {% endfor %}
       {% for file in files %}
         <div class="list-row selectable-item" data-row-file-id="{{ file.id }}" data-file-id="{{ file.id }}" onclick="handleItemClick(event, {{ forloop.counter0 }}, {{ file.id }})" style="cursor:pointer;">
@@ -131,7 +138,9 @@
             <tr>
               <td></td>
               <td><a href="{% if space == 'group' %}{% url 'storage:group_folder' group.id f.id %}{% else %}{% url 'storage:my_space_folder' f.id %}{% endif %}">📁 {{ f.name }}</a></td>
-              <td>Folder</td><td>—</td><td>{{ f.created_at|date:"M j, Y" }}</td><td>—</td><td></td>
+              <td>Folder</td><td>—</td><td>{{ f.created_at|date:"M j, Y" }}</td><td>—</td>
+              <td><button class="overflow-menu-btn" title="Delete folder"
+                          onclick="deleteFolder('{{ f.name|escapejs }}', {% if f.child_count == 0 and f.file_count == 0 %}true{% else %}false{% endif %}, '{% url 'storage:delete_folder' f.id %}')">🗑</button></td>
             </tr>
           {% endfor %}
           {% for file in files %}
@@ -166,6 +175,7 @@
 <div id="select-bar" class="select-bar">
   <span id="select-count">0 selected</span>
   <div style="display:flex;gap:8px;">
+    <button class="btn secondary" onclick="selectAll()">Select All</button>
     <button class="btn secondary" onclick="downloadSelected()">Download</button>
     <button class="btn secondary" onclick="toggleSelectMode()">Done</button>
   </div>
@@ -196,7 +206,9 @@
       {% csrf_token %}
       <div class="checkbox-row"><input type="checkbox" id="perm-upload" name="can_upload"><label for="perm-upload">Allow uploading files</label></div>
       <div class="checkbox-row"><input type="checkbox" id="perm-folders" name="can_create_folders"><label for="perm-folders">Allow creating folders</label></div>
+      <div class="checkbox-row"><input type="checkbox" id="perm-delete-folders" name="can_delete_folders"><label for="perm-delete-folders">Allow deleting folders</label></div>
       <div class="checkbox-row"><input type="checkbox" id="perm-tags" name="can_manage_tags"><label for="perm-tags">Allow adding/updating tags</label></div>
+      <p class="sub" style="color:var(--text-secondary);font-size:12px;margin-top:4px;">Sharing includes everything inside this folder's subfolders too.</p>
       <button type="submit" class="btn block" style="margin-top:12px;">Create Share Link</button>
     </form>
     {% for link in folder.share_links.all %}
@@ -258,6 +270,11 @@
   });
   document.getElementById('lightbox-menu').addEventListener('click', function(e){
     if (e.target === this) this.classList.remove('open');
+  });
+
+  handleCopiedShareParam(function () {
+    var modal = document.getElementById('modal-share');
+    if (modal) openModal('modal-share');
   });
 </script>
 {% endblock %}

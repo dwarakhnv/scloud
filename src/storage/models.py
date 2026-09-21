@@ -96,6 +96,25 @@ class Folder(models.Model):
         base = Constants.files_dir(self.owner_type(), self.owner_id_value())
         return base / self.relative_path()
 
+    def is_within(self, ancestor) -> bool:
+        """True if this folder is `ancestor` itself or nested somewhere below it."""
+        node = self
+        while node is not None:
+            if node.id == ancestor.id:
+                return True
+            node = node.parent
+        return False
+
+    def is_empty(self) -> bool:
+        return not self.children.exists() and not self.files.exists()
+
+    def subtree_ids(self):
+        """This folder's id plus every descendant folder's id."""
+        ids = [self.id]
+        for child in self.children.all():
+            ids.extend(child.subtree_ids())
+        return ids
+
 
 class Tag(models.Model):
     """A tag, scoped to either a user's My Space or a Group."""
@@ -223,6 +242,7 @@ class ShareLink(models.Model):
     can_upload = models.BooleanField(default=False)
     can_create_folders = models.BooleanField(default=False)
     can_manage_tags = models.BooleanField(default=False)
+    can_delete_folders = models.BooleanField(default=False)
 
     def __str__(self):
         return f"ShareLink({self.token})"

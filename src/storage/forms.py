@@ -31,3 +31,4 @@ class ShareLinkForm(forms.Form):
     can_upload = forms.BooleanField(required=False)
     can_create_folders = forms.BooleanField(required=False)
     can_manage_tags = forms.BooleanField(required=False)
+    can_delete_folders = forms.BooleanField(required=False)
