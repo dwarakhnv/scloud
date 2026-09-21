@@ -8,6 +8,8 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="theme-color" content="#000000" id="theme-color-meta">
   <title>{% block title %}SCloud{% endblock %}</title>
+  <link rel="icon" href="{% static 'image/logo.png' %}">
+  <link rel="apple-touch-icon" href="{% static 'image/logo.png' %}">
   <link rel="stylesheet" href="{% static 'css/app.css' %}">
   <script>
     (function () {
@@ -29,6 +31,21 @@
     </div>
   {% endif %}
   {% block body %}{% endblock %}
+  <div class="drop-overlay" id="drop-overlay">
+    <div class="drop-overlay-inner">📥<br>Drop files to upload</div>
+  </div>
+  <div class="modal-backdrop" id="folder-menu">
+    <div class="modal-sheet">
+      <h3 id="folder-menu-title"></h3>
+      <div id="folder-menu-body"></div>
+    </div>
+  </div>
+  <div class="spinner-overlay" id="spinner-overlay">
+    <div class="spinner-overlay-inner">
+      <div class="spinner"></div>
+      <div id="spinner-overlay-text">Preparing download...</div>
+    </div>
+  </div>
   <script src="{% static 'js/app.js' %}"></script>
   {% block extra_scripts %}{% endblock %}
 </body>

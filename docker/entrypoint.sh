@@ -44,6 +44,7 @@ fi
 echo "[entrypoint] Starting SCloud on port ${SCLOUD_PORT:-5125}..."
 exec gunicorn scloud.wsgi:application \
     --bind "0.0.0.0:${SCLOUD_PORT:-5125}" \
+    --worker-class gthread \
     --workers "${GUNICORN_WORKERS:-4}" \
     --threads "${GUNICORN_THREADS:-4}" \
     --timeout "${GUNICORN_TIMEOUT:-600}"

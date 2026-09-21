@@ -29,12 +29,18 @@
     {% endif %}
   </div>
 
+  <div class="item-count-row">{{ folder_count }} folder{{ folder_count|pluralize }} &middot; {{ file_count }} file{{ file_count|pluralize }}</div>
+
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
     <select onchange="goSharedSort(this.value)" title="Sort by">
-      <option value="uploaded" {% if sort_mode == 'uploaded' %}selected{% endif %}>Upload date</option>
-      <option value="captured" {% if sort_mode == 'captured' %}selected{% endif %}>Media date</option>
-      <option value="name" {% if sort_mode == 'name' %}selected{% endif %}>File name</option>
-      <option value="type" {% if sort_mode == 'type' %}selected{% endif %}>File type</option>
+      <option value="name_asc" {% if sort_mode == 'name_asc' %}selected{% endif %}>File name (A-Z)</option>
+      <option value="name_desc" {% if sort_mode == 'name_desc' %}selected{% endif %}>File name (Z-A)</option>
+      <option value="uploaded_desc" {% if sort_mode == 'uploaded_desc' %}selected{% endif %}>Upload date (newest first)</option>
+      <option value="uploaded_asc" {% if sort_mode == 'uploaded_asc' %}selected{% endif %}>Upload date (oldest first)</option>
+      <option value="captured_desc" {% if sort_mode == 'captured_desc' %}selected{% endif %}>Media date (newest first)</option>
+      <option value="captured_asc" {% if sort_mode == 'captured_asc' %}selected{% endif %}>Media date (oldest first)</option>
+      <option value="type_asc" {% if sort_mode == 'type_asc' %}selected{% endif %}>File type (images first)</option>
+      <option value="type_desc" {% if sort_mode == 'type_desc' %}selected{% endif %}>File type (other first)</option>
       <option value="size_desc" {% if sort_mode == 'size_desc' %}selected{% endif %}>File size (largest first)</option>
       <option value="size_asc" {% if sort_mode == 'size_asc' %}selected{% endif %}>File size (smallest first)</option>
     </select>
@@ -60,8 +66,8 @@
     {% for f in subfolders %}
       <div class="box-item folder-box" onclick="window.location='{% url 'storage:shared_folder' link.token f.id %}'">
         {% if link.can_delete_folders %}
-          <button type="button" class="folder-delete-btn" title="Delete folder"
-                  onclick="event.stopPropagation();sharedDeleteFolder('{{ f.name|escapejs }}', {% if f.child_count == 0 and f.file_count == 0 %}true{% else %}false{% endif %}, '{% url 'storage:shared_delete_folder' link.token f.id %}')">🗑</button>
+          <button type="button" class="folder-delete-btn" title="Folder options"
+                  onclick="event.stopPropagation();openFolderMenu('{{ f.name|escapejs }}', {% if f.child_count == 0 and f.file_count == 0 %}true{% else %}false{% endif %}, '{% url 'storage:shared_delete_folder' link.token f.id %}', '{% url 'storage:shared_rename_folder' link.token f.id %}')">⋮</button>
         {% endif %}
         <div class="box-thumb">📁</div>
         <div class="box-label">{{ f.name }}</div>
@@ -85,8 +91,12 @@
   +
   <input id="shared-file-input" type="file" multiple style="display:none" onchange="sharedStartUpload(this)">
 </label>
-<div id="upload-progress" class="progress-bar" style="display:none;position:fixed;left:16px;right:16px;bottom:90px;z-index:40;">
-  <div class="fill"></div>
+<div id="upload-progress" class="upload-progress-wrap">
+  <div class="upload-progress-label">
+    <span id="upload-progress-text">Uploading...</span>
+    <span id="upload-progress-percent">0%</span>
+  </div>
+  <div class="progress-bar"><div class="fill"></div></div>
 </div>
 {% endif %}
 
@@ -139,6 +149,14 @@
   window.SCLOUD_UPLOAD_CHUNK_URL = "{% url 'storage:shared_upload_chunk' link.token %}";
   window.SCLOUD_CURRENT_FOLDER_ID = "{{ folder.id|default:'' }}";
   window.SCLOUD_READ_ONLY_LIGHTBOX = true;
+
+  {% if link.can_upload %}
+  setupDropZone({
+    folderId: window.SCLOUD_CURRENT_FOLDER_ID,
+    uploadUrl: window.SCLOUD_UPLOAD_URL,
+    chunkUrl: window.SCLOUD_UPLOAD_CHUNK_URL,
+  });
+  {% endif %}
 
   function goSharedSort(mode) {
     var path = window.SCLOUD_CURRENT_FOLDER_ID

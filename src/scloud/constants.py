@@ -105,6 +105,13 @@ class Constants:
     THUMBNAILS_SUBDIR = "thumbnails"
     UPLOAD_TMP_SUBDIR = "_uploads_tmp"
 
+    # Where multi-file "download selected" zip archives are staged, briefly,
+    # before being streamed to the browser. Lives under DATA_ROOT (NOT
+    # DATABASE_PATH/db/) since it's just bulky, disposable file content, not
+    # anything that needs SQLite-grade consistency guarantees.
+    ZIP_TMP_SUBDIR = "_zip_tmp"
+    ZIP_TMP_MAX_AGE_HOURS = int(_get("ZIP_TMP_MAX_AGE_HOURS", 24))
+
     THUMBNAIL_MAX_DIMENSION = int(_get("THUMBNAIL_SIZE", 256))  # px, long edge
     THUMBNAIL_JPEG_QUALITY = 60
 
@@ -128,6 +135,7 @@ class Constants:
         cls.DATA_ROOT.mkdir(parents=True, exist_ok=True)
         cls.DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
         cls.upload_tmp_dir().mkdir(parents=True, exist_ok=True)
+        cls.zip_tmp_dir().mkdir(parents=True, exist_ok=True)
 
     @classmethod
     def upload_tmp_dir(cls) -> Path:
@@ -135,6 +143,10 @@ class Constants:
         # drive) so assembling a multi-GB chunked upload never needs a
         # slow cross-drive move, and never fills up the OS system drive.
         return cls.DATA_ROOT / cls.UPLOAD_TMP_SUBDIR
+
+    @classmethod
+    def zip_tmp_dir(cls) -> Path:
+        return cls.DATA_ROOT / cls.ZIP_TMP_SUBDIR
 
     # --- Owner-scoped directory helpers -------------------------------
     @classmethod

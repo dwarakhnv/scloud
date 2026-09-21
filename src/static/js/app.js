@@ -13,6 +13,16 @@ function closeModal(id) {
   document.getElementById(id).classList.remove('open');
 }
 
+// Delegated so it works for any .modal-backdrop regardless of where it sits
+// in the DOM or when it was added (base.html's shared modals render after
+// each page's own inline <script>, so a plain querySelectorAll at parse
+// time would miss them).
+document.addEventListener('click', (e) => {
+  if (e.target.classList && e.target.classList.contains('modal-backdrop')) {
+    e.target.classList.remove('open');
+  }
+});
+
 // ---------------------------------------------------------------------
 // Theme (dark / light)
 // ---------------------------------------------------------------------
@@ -143,26 +153,96 @@ function sharedStartUpload(input) {
   input.value = '';
 }
 
+// ---------------------------------------------------------------------
+// Drag-and-drop upload - drag files from the OS file explorer straight
+// onto the page.
+// ---------------------------------------------------------------------
+
+function setupDropZone(opts) {
+  const overlay = document.getElementById('drop-overlay');
+  if (!overlay) return;
+
+  let dragDepth = 0;
+
+  function hasFiles(e) {
+    return e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
+  }
+
+  document.addEventListener('dragenter', (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth += 1;
+    overlay.classList.add('open');
+  });
+
+  document.addEventListener('dragover', (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+  });
+
+  document.addEventListener('dragleave', (e) => {
+    if (!hasFiles(e)) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) overlay.classList.remove('open');
+  });
+
+  document.addEventListener('drop', (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth = 0;
+    overlay.classList.remove('open');
+    const files = Array.from(e.dataTransfer.files || []);
+    if (files.length) uploadFileList(files, opts);
+  });
+}
+
+function isMobileDevice() {
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = bytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
 async function uploadFileList(files, opts) {
   if (!files.length) return;
-  const bar = document.getElementById('upload-progress');
-  const fill = bar ? bar.querySelector('.fill') : null;
-  if (bar) bar.style.display = 'block';
+  const wrap = document.getElementById('upload-progress');
+  const fill = wrap ? wrap.querySelector('.fill') : null;
+  const percentLabel = document.getElementById('upload-progress-percent');
+  const textLabel = document.getElementById('upload-progress-text');
+  if (wrap) wrap.classList.add('open');
 
   const totalBytes = files.reduce((s, f) => s + f.size, 0) || 1;
+  const totalHuman = formatBytes(totalBytes);
   let doneBytes = 0;
   const failed = [];
 
   for (const file of files) {
     try {
       await uploadSingleFile(file, opts, (loaded) => {
-        if (fill) fill.style.width = Math.round(((doneBytes + loaded) / totalBytes) * 100) + '%';
+        const currentBytes = doneBytes + loaded;
+        const percent = Math.round((currentBytes / totalBytes) * 100);
+        if (fill) fill.style.width = percent + '%';
+        if (percentLabel) percentLabel.textContent = `${percent}%`;
+        if (textLabel) {
+          textLabel.textContent = `${formatBytes(currentBytes)} of ${totalHuman}`;
+        }
       });
     } catch (e) {
       failed.push(file.name);
     }
     doneBytes += file.size;
   }
+
+  if (wrap) wrap.classList.remove('open');
 
   if (failed.length) {
     alert(`Failed to upload: ${failed.join(', ')}`);
@@ -341,6 +421,69 @@ function sharedDeleteFolder(name, isEmpty, url) {
 }
 
 // ---------------------------------------------------------------------
+// Folder options menu (Rename / Delete)
+// ---------------------------------------------------------------------
+
+function openFolderMenu(name, isEmpty, deleteUrl, renameUrl) {
+  document.getElementById('folder-menu-title').textContent = name;
+  renderFolderMenuOptions(name, isEmpty, deleteUrl, renameUrl);
+  openModal('folder-menu');
+}
+
+function renderFolderMenuOptions(name, isEmpty, deleteUrl, renameUrl) {
+  const body = document.getElementById('folder-menu-body');
+  body.innerHTML = `
+    <button type="button" class="btn secondary block" style="margin-bottom:8px;"
+            onclick="startFolderRename('${escapeJsString(name)}', '${renameUrl}', ${isEmpty}, '${deleteUrl}')">Rename</button>
+    <button type="button" class="btn danger block" style="margin-bottom:8px;"
+            onclick="closeModal('folder-menu');deleteFolder('${escapeJsString(name)}', ${isEmpty}, '${deleteUrl}')">Delete</button>
+    <button type="button" class="btn secondary block" onclick="closeModal('folder-menu')">Cancel</button>
+  `;
+}
+
+function startFolderRename(currentName, renameUrl, isEmpty, deleteUrl) {
+  const body = document.getElementById('folder-menu-body');
+  body.innerHTML = `
+    <div class="form-group">
+      <input type="text" id="folder-rename-input" value="${escapeHtml(currentName)}">
+    </div>
+    <button type="button" class="btn block" style="margin-bottom:8px;" onclick="submitFolderRename('${renameUrl}')">Save</button>
+    <button type="button" class="btn secondary block"
+            onclick="renderFolderMenuOptions('${escapeJsString(currentName)}', ${isEmpty}, '${deleteUrl}', '${renameUrl}')">Cancel</button>
+  `;
+  const input = document.getElementById('folder-rename-input');
+  input.focus();
+  input.select();
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') submitFolderRename(renameUrl);
+  });
+}
+
+function submitFolderRename(renameUrl) {
+  const input = document.getElementById('folder-rename-input');
+  const name = input.value.trim();
+  if (!name) return;
+  fetch(renameUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'X-CSRFToken': csrftoken,
+      'X-Requested-With': 'XMLHttpRequest',
+    },
+    body: `name=${encodeURIComponent(name)}`,
+  })
+    .then((r) => r.json())
+    .then((data) => {
+      if (data.error) { alert(data.error); return; }
+      window.location.reload();
+    });
+}
+
+function escapeJsString(str) {
+  return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+// ---------------------------------------------------------------------
 // Thumbnail polling
 // ---------------------------------------------------------------------
 
@@ -429,13 +572,18 @@ function handleItemClick(e, index, fileId) {
   openLightbox(index);
 }
 
-// Downloads each selected file. Where the browser supports the Web Share
-// API with files (most modern mobile browsers), images/videos are handed
-// to the OS share sheet so the person can pick "Save to Photos" directly -
-// that's the only way a website can get files into the camera roll. PDFs
-// and other non-media files can't go to Photos anyway, so they always just
-// download normally. Falls back to plain sequential downloads everywhere
-// else (desktop, or when the share sheet isn't available/is cancelled).
+// Where the browser supports the Web Share API with files (most modern
+// mobile browsers), images/videos are handed to the OS share sheet so the
+// person can pick "Save to Photos" directly - that's the only way a website
+// can get files into the camera roll, and it only works file-by-file
+// (unzipped), so it's tried first for images/videos specifically.
+//
+// Whatever's left after that (PDFs/other files always, or everything if
+// Web Share wasn't available/was cancelled) downloads as a single zip once
+// there's more than one file - one HTTP request and one save-file dialog
+// instead of N of each, which is what was making multi-file downloads feel
+// slow. A lone file just downloads directly; zipping one file would only
+// add overhead.
 async function downloadSelected() {
   const files = (window.SCLOUD_FILES || []).filter((f) => selectedIds.has(f.id));
   if (!files.length) return;
@@ -443,8 +591,13 @@ async function downloadSelected() {
   const mediaFiles = files.filter((f) => f.is_image || f.is_video);
   const otherFiles = files.filter((f) => !f.is_image && !f.is_video);
 
+  // Windows (and some desktop Linux/macOS builds of Chrome/Edge) also
+  // implement navigator.share/canShare for files, popping their own native
+  // "Share" dialog - not what anyone wants when they just clicked Download
+  // on a desktop. Restrict the Photos-friendly Web Share path to actual
+  // mobile devices, where it's the only way to land files in Photos at all.
   let sharedMedia = false;
-  if (mediaFiles.length && navigator.share && navigator.canShare) {
+  if (mediaFiles.length && isMobileDevice() && navigator.share && navigator.canShare) {
     try {
       const blobFiles = await Promise.all(mediaFiles.map(async (f) => {
         const resp = await fetch(f.url);
@@ -460,8 +613,58 @@ async function downloadSelected() {
     }
   }
 
-  const toSequentialDownload = sharedMedia ? otherFiles : files;
-  sequentialDownload(toSequentialDownload);
+  const remaining = sharedMedia ? otherFiles : files;
+  if (!remaining.length) return;
+  if (remaining.length === 1) {
+    sequentialDownload(remaining);
+  } else {
+    await downloadAsZip(remaining);
+  }
+}
+
+function showSpinner(text) {
+  const overlay = document.getElementById('spinner-overlay');
+  if (!overlay) return;
+  const label = document.getElementById('spinner-overlay-text');
+  if (label && text) label.textContent = text;
+  overlay.classList.add('open');
+}
+
+function hideSpinner() {
+  const overlay = document.getElementById('spinner-overlay');
+  if (overlay) overlay.classList.remove('open');
+}
+
+async function downloadAsZip(files) {
+  showSpinner('Preparing download...');
+  try {
+    const body = new URLSearchParams();
+    files.forEach((f) => body.append('file_ids', f.id));
+
+    const resp = await fetch('/files/zip/', {
+      method: 'POST',
+      // Passing `body` as-is (not body.toString()) matters: fetch only sets
+      // the application/x-www-form-urlencoded Content-Type automatically
+      // for a URLSearchParams *instance*. A plain string body defaults to
+      // text/plain, which Django's request.POST doesn't parse at all - that
+      // was silently turning every file_ids value into an empty list.
+      headers: { 'X-CSRFToken': csrftoken, 'X-Requested-With': 'XMLHttpRequest' },
+      body,
+    });
+    const data = await resp.json();
+    if (data.error) { alert(data.error); return; }
+
+    const a = document.createElement('a');
+    a.href = data.url;
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } catch (e) {
+    alert('Failed to prepare the download. Please try again.');
+  } finally {
+    hideSpinner();
+  }
 }
 
 function sequentialDownload(files) {
@@ -579,6 +782,7 @@ function renderLightboxMenu() {
 
   if (!readOnly) {
     html += `
+      <button type="button" class="btn secondary block" style="margin-bottom:8px;" onclick="openLightboxRename()">Rename</button>
       <button type="button" class="btn secondary block" style="margin-bottom:8px;" onclick="openLightboxMove()">Move</button>
       <button type="button" class="btn danger block" style="margin-bottom:8px;" onclick="lightboxDelete()">Delete</button>
     `;
@@ -590,6 +794,55 @@ function renderLightboxMenu() {
 
 function toggleLightboxMenu() {
   document.getElementById('lightbox-menu').classList.toggle('open');
+}
+
+function openLightboxRename() {
+  const files = lightboxFiles();
+  const file = files[lightboxIndex];
+
+  const menuBody = document.getElementById('lightbox-menu-body');
+  menuBody.innerHTML = `
+    <h3>Rename file</h3>
+    <div class="form-group">
+      <input type="text" id="lightbox-rename-input" value="${escapeHtml(file.filename)}">
+    </div>
+    <button type="button" class="btn block" style="margin-bottom:8px;" onclick="lightboxRenameConfirm()">Save</button>
+    <button type="button" class="btn secondary block" onclick="renderLightboxMenu()">Cancel</button>
+  `;
+  const input = document.getElementById('lightbox-rename-input');
+  input.focus();
+  input.select();
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') lightboxRenameConfirm();
+  });
+}
+
+function lightboxRenameConfirm() {
+  const files = lightboxFiles();
+  const file = files[lightboxIndex];
+  const newName = document.getElementById('lightbox-rename-input').value.trim();
+  if (!newName) return;
+
+  fetch(`/file/${file.id}/rename/`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'X-CSRFToken': csrftoken,
+      'X-Requested-With': 'XMLHttpRequest',
+    },
+    body: `name=${encodeURIComponent(newName)}`,
+  })
+    .then((r) => r.json())
+    .then((data) => {
+      if (data.error) { alert(data.error); return; }
+      file.filename = data.filename;
+      document.getElementById('lightbox-title').textContent = file.filename;
+      const gridEl = document.querySelector(`[data-grid-file-id="${file.id}"] .box-label`);
+      if (gridEl) gridEl.textContent = file.filename;
+      const rowEl = document.querySelector(`[data-row-file-id="${file.id}"] .name`);
+      if (rowEl) rowEl.textContent = file.filename;
+      renderLightboxMenu();
+    });
 }
 
 function openLightboxMove() {

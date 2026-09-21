@@ -1,6 +1,7 @@
 import os
 import shutil
 import uuid
+import zipfile
 from pathlib import Path
 
 from django.contrib import messages
@@ -9,9 +10,10 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db.models import Case, Count, IntegerField, When
 from django.db.models.functions import Coalesce, Lower
-from django.http import HttpResponse, HttpResponseBadRequest, JsonResponse
+from django.http import HttpResponse, HttpResponseBadRequest, JsonResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.defaultfilters import filesizeformat
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_POST
@@ -31,7 +33,14 @@ from .thumbnails import queue_thumbnail
 User = get_user_model()
 
 VIEW_MODES = ("boxes", "list", "details")
-SORT_MODES = ("name", "captured", "uploaded", "type", "size_asc", "size_desc")
+SORT_MODES = (
+    "name_asc", "name_desc",
+    "uploaded_asc", "uploaded_desc",
+    "captured_asc", "captured_desc",
+    "type_asc", "type_desc",
+    "size_asc", "size_desc",
+)
+DEFAULT_SORT_MODE = "name_asc"
 
 
 # --------------------------------------------------------------------------
@@ -47,21 +56,24 @@ def _get_view_mode(request):
 
 
 def _get_sort_mode(request):
-    mode = request.GET.get("sort") or request.session.get("sort_mode", "uploaded")
+    mode = request.GET.get("sort") or request.session.get("sort_mode", DEFAULT_SORT_MODE)
     if mode not in SORT_MODES:
-        mode = "uploaded"
+        mode = DEFAULT_SORT_MODE
     request.session["sort_mode"] = mode
     return mode
 
 
 def _apply_sort(files_qs, sort_mode):
-    if sort_mode == "name":
-        return files_qs.annotate(_sort_name=Lower("filename")).order_by("_sort_name")
-    if sort_mode == "captured":
+    descending = sort_mode.endswith("_desc")
+    sign = "-" if descending else ""
+
+    if sort_mode.startswith("name_"):
+        return files_qs.annotate(_sort_name=Lower("filename")).order_by(f"{sign}_sort_name")
+    if sort_mode.startswith("captured_"):
         return files_qs.annotate(_sort_date=Coalesce("captured_at", "uploaded_at")).order_by(
-            "-_sort_date"
+            f"{sign}_sort_date"
         )
-    if sort_mode == "type":
+    if sort_mode.startswith("type_"):
         # Group images, then videos, then everything else; alphabetical within each group.
         return files_qs.annotate(
             _sort_type=Case(
@@ -71,12 +83,11 @@ def _apply_sort(files_qs, sort_mode):
                 output_field=IntegerField(),
             ),
             _sort_name=Lower("filename"),
-        ).order_by("_sort_type", "_sort_name")
-    if sort_mode == "size_asc":
-        return files_qs.order_by("size_bytes")
-    if sort_mode == "size_desc":
-        return files_qs.order_by("-size_bytes")
-    return files_qs.order_by("-uploaded_at")
+        ).order_by(f"{sign}_sort_type", "_sort_name")
+    if sort_mode.startswith("size_"):
+        return files_qs.order_by(f"{sign}size_bytes")
+    # uploaded_asc / uploaded_desc, and the fallback for an unrecognized mode.
+    return files_qs.order_by(f"{sign}uploaded_at" if sort_mode.startswith("uploaded_") else "-uploaded_at")
 
 
 def _breadcrumbs(folder):
@@ -104,6 +115,19 @@ def _serialize_file(media_file):
         "tag_ids": [t.id for t in media_file.tags.all()],
         "folder_id": media_file.folder_id,
     }
+
+
+def _clean_name(raw_name: str) -> str:
+    """Validate a user-supplied folder/file name. Raises ValueError with a
+    human-readable message if it's not usable as a single path segment."""
+    name = (raw_name or "").strip()
+    if not name:
+        raise ValueError("Name cannot be empty.")
+    if "/" in name or "\\" in name:
+        raise ValueError("Name cannot contain / or \\.")
+    if name in (".", ".."):
+        raise ValueError("Invalid name.")
+    return name
 
 
 def _unique_filename(dest_dir: Path, filename: str) -> str:
@@ -217,6 +241,7 @@ def _render_browser(request, space, owner, group, folder):
     subfolders_qs = subfolders_qs.annotate(
         child_count=Count("children", distinct=True), file_count=Count("files", distinct=True),
     ).order_by("name")
+    subfolders_list = list(subfolders_qs)
 
     if space == "group":
         all_folders = Folder.objects.filter(group=group).order_by("name")
@@ -231,7 +256,9 @@ def _render_browser(request, space, owner, group, folder):
         "group": group,
         "folder": folder,
         "breadcrumbs": _breadcrumbs(folder),
-        "subfolders": subfolders_qs,
+        "subfolders": subfolders_list,
+        "folder_count": len(subfolders_list),
+        "file_count": len(files_list),
         "files": files_list,
         "all_folders": all_folders,
         "view_mode": _get_view_mode(request),
@@ -647,6 +674,75 @@ def move_folder(request, folder_id):
 
 @login_required
 @require_POST
+def rename_folder(request, folder_id):
+    folder = get_object_or_404(Folder, id=folder_id)
+    check_folder_access(request.user, folder)
+
+    try:
+        new_name = _clean_name(request.POST.get("name"))
+    except ValueError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    if new_name != folder.name:
+        # Folder.relative_path()/full_path() are derived live from `name`, so
+        # every descendant folder and file automatically resolves to the new
+        # path once this save() commits - nothing else in the DB needs to
+        # change. Moving this one directory on disk brings the whole
+        # subtree along with it, since it's just an OS-level rename.
+        old_path = folder.full_path()
+        prospective_path = old_path.parent / new_name
+        if prospective_path != old_path and prospective_path.exists():
+            return JsonResponse(
+                {"error": "A folder with that name already exists here."}, status=400
+            )
+
+        folder.name = new_name
+        folder.save(update_fields=["name"])
+        new_path = folder.full_path()
+
+        if old_path != new_path and old_path.exists():
+            new_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(old_path), str(new_path))
+
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return JsonResponse({"ok": True, "name": folder.name})
+    messages.success(request, f"Renamed to '{folder.name}'.")
+    return redirect(request.META.get("HTTP_REFERER", "/"))
+
+
+@login_required
+@require_POST
+def rename_file(request, file_id):
+    media_file = get_object_or_404(MediaFile, id=file_id)
+    check_file_access(request.user, media_file)
+
+    try:
+        new_name = _clean_name(request.POST.get("name"))
+    except ValueError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    if new_name != media_file.filename:
+        old_path = media_file.disk_path()
+        dest_dir = old_path.parent
+        final_name = _unique_filename(dest_dir, new_name)
+        new_path = dest_dir / final_name
+
+        if old_path.exists():
+            shutil.move(str(old_path), str(new_path))
+
+        media_file.filename = final_name
+        media_file.is_image = Constants.is_image(final_name)
+        media_file.is_video = Constants.is_video(final_name)
+        media_file.save(update_fields=["filename", "is_image", "is_video"])
+
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return JsonResponse({"ok": True, "filename": media_file.filename})
+    messages.success(request, f"Renamed to '{media_file.filename}'.")
+    return redirect(request.META.get("HTTP_REFERER", "/"))
+
+
+@login_required
+@require_POST
 def delete_file(request, file_id):
     media_file = get_object_or_404(MediaFile, id=file_id)
     check_file_access(request.user, media_file)
@@ -698,6 +794,116 @@ def delete_folder(request, folder_id):
         return JsonResponse({"ok": True})
     messages.success(request, f"Deleted folder '{name}'.")
     return redirect(request.META.get("HTTP_REFERER", "/"))
+
+
+# --------------------------------------------------------------------------
+# Bulk download (zip)
+# --------------------------------------------------------------------------
+# Multi-select "Download" for 2+ files builds a zip server-side instead of
+# firing off one HTTP request per file - much cheaper for everyone once you
+# get past a handful of files. The zip is staged under Constants.DATA_ROOT
+# (never the database's drive - see Constants.zip_tmp_dir) and is deleted
+# the moment it's finished streaming, whether that's because the download
+# completed normally or the connection dropped partway through (both paths
+# run the same `finally` block below). A lazy sweep for anything left behind
+# by a hard crash runs at the start of every new zip request.
+
+def _cleanup_stale_zips():
+    cutoff = timezone.now().timestamp() - (Constants.ZIP_TMP_MAX_AGE_HOURS * 3600)
+    zip_dir = Constants.zip_tmp_dir()
+    try:
+        entries = os.scandir(zip_dir)
+    except FileNotFoundError:
+        return
+    with entries:
+        for entry in entries:
+            try:
+                if entry.is_file() and entry.stat().st_mtime < cutoff:
+                    os.unlink(entry.path)
+            except OSError:
+                pass
+
+
+def _dedupe_arcname(used_names: set, filename: str) -> str:
+    if filename not in used_names:
+        used_names.add(filename)
+        return filename
+    stem, suffix = Path(filename).stem, Path(filename).suffix
+    counter = 1
+    while True:
+        candidate = f"{stem} ({counter}){suffix}"
+        if candidate not in used_names:
+            used_names.add(candidate)
+            return candidate
+        counter += 1
+
+
+@login_required
+@require_POST
+def create_zip_download(request):
+    file_ids = request.POST.getlist("file_ids")
+    if not file_ids:
+        return JsonResponse({"error": "No files selected."}, status=400)
+
+    media_files = []
+    for file_id in file_ids:
+        media_file = get_object_or_404(MediaFile, id=file_id)
+        check_file_access(request.user, media_file)
+        media_files.append(media_file)
+
+    _cleanup_stale_zips()
+
+    zip_name = f"{request.user.id}_{uuid.uuid4().hex}.zip"
+    zip_path = Constants.zip_tmp_dir() / zip_name
+
+    used_names = set()
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_STORED) as zf:
+        for media_file in media_files:
+            src = media_file.disk_path()
+            if not src.exists():
+                continue
+            arcname = _dedupe_arcname(used_names, media_file.filename)
+            zf.write(src, arcname=arcname)
+
+    return JsonResponse({"url": reverse("storage:serve_zip_download", args=[zip_name])})
+
+
+def _stream_and_delete(path, chunk_size=1024 * 1024):
+    try:
+        with open(path, "rb") as f:
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                yield chunk
+    finally:
+        # Runs whether the loop above finished normally or the client
+        # disconnected mid-stream (Python calls .close() on an abandoned
+        # generator, which raises GeneratorExit at the current yield and
+        # unwinds straight into this finally block either way).
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+@login_required
+def serve_zip_download(request, zip_name):
+    # Zip filenames are prefixed with the creating user's id as a basic
+    # ownership check - the random uuid after it already makes them
+    # unguessable, this just stops one user's download link from working
+    # for anyone who happens to be logged in as someone else.
+    if not zip_name.startswith(f"{request.user.id}_") or "/" in zip_name or "\\" in zip_name:
+        raise PermissionDenied()
+
+    zip_path = Constants.zip_tmp_dir() / zip_name
+    if not zip_path.exists():
+        return HttpResponse(status=404)
+
+    response = StreamingHttpResponse(_stream_and_delete(zip_path), content_type="application/zip")
+    response["Content-Length"] = zip_path.stat().st_size
+    response["Content-Disposition"] = 'attachment; filename="scloud-download.zip"'
+    return response
 
 
 # --------------------------------------------------------------------------
@@ -816,9 +1022,9 @@ def shared_view(request, token, folder_id=None):
     owner, group, root_folder = _share_scope(link)
     current_folder = _resolve_shared_folder(link, folder_id)
 
-    subfolders_qs = Folder.objects.filter(parent=current_folder).annotate(
+    subfolders_list = list(Folder.objects.filter(parent=current_folder).annotate(
         child_count=Count("children", distinct=True), file_count=Count("files", distinct=True),
-    ).order_by("name")
+    ).order_by("name"))
 
     if current_folder:
         files = MediaFile.objects.filter(folder=current_folder)
@@ -839,7 +1045,9 @@ def shared_view(request, token, folder_id=None):
         {
             "link": link, "folder": current_folder, "group": group,
             "breadcrumbs": _shared_breadcrumbs(link, current_folder),
-            "subfolders": subfolders_qs,
+            "subfolders": subfolders_list,
+            "folder_count": len(subfolders_list),
+            "file_count": len(files),
             "files": files, "sort_mode": sort_mode, "available_tags": tags,
             "files_data": [_serialize_file(f) for f in files],
             "tags_data": [{"id": t.id, "name": t.name} for t in tags],
@@ -937,6 +1145,43 @@ def shared_delete_folder(request, token, folder_id):
     if parent_id:
         return redirect("storage:shared_folder", token=token, folder_id=parent_id)
     return redirect("storage:shared", token=token)
+
+
+@require_POST
+def shared_rename_folder(request, token, folder_id):
+    link = _get_valid_link(token)
+    if not link or not link.can_delete_folders:
+        raise PermissionDenied("Managing folders is not allowed on this link.")
+
+    folder = _resolve_shared_folder(link, folder_id)
+    if not folder:
+        raise PermissionDenied()
+    if link.folder_id and folder.id == link.folder_id:
+        raise PermissionDenied("Cannot rename the shared folder itself.")
+
+    try:
+        new_name = _clean_name(request.POST.get("name"))
+    except ValueError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    if new_name != folder.name:
+        old_path = folder.full_path()
+        prospective_path = old_path.parent / new_name
+        if prospective_path != old_path and prospective_path.exists():
+            return JsonResponse(
+                {"error": "A folder with that name already exists here."}, status=400
+            )
+        folder.name = new_name
+        folder.save(update_fields=["name"])
+        new_path = folder.full_path()
+        if old_path != new_path and old_path.exists():
+            new_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(old_path), str(new_path))
+
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return JsonResponse({"ok": True, "name": folder.name})
+    messages.success(request, f"Renamed to '{folder.name}'.")
+    return redirect("storage:shared_folder", token=token, folder_id=folder.id)
 
 
 @require_POST

@@ -22,6 +22,7 @@ urlpatterns = [
     # Folders
     path("folder/create/", views.folder_create, name="folder_create"),
     path("folder/<int:folder_id>/move/", views.move_folder, name="move_folder"),
+    path("folder/<int:folder_id>/rename/", views.rename_folder, name="rename_folder"),
     path("folder/<int:folder_id>/share/", views.share_folder, name="share_folder"),
     path("folder/<int:folder_id>/delete/", views.delete_folder, name="delete_folder"),
 
@@ -34,11 +35,16 @@ urlpatterns = [
     path("file/<int:file_id>/thumbnail/", views.serve_thumbnail, name="serve_thumbnail"),
     path("file/<int:file_id>/status/", views.file_status, name="file_status"),
     path("file/<int:file_id>/move/", views.move_file, name="move_file"),
+    path("file/<int:file_id>/rename/", views.rename_file, name="rename_file"),
     path("file/<int:file_id>/delete/", views.delete_file, name="delete_file"),
     path("file/<int:file_id>/tag/", views.file_tag_toggle, name="file_tag_toggle"),
 
     # Tags
     path("tags/create/", views.tag_create, name="tag_create"),
+
+    # Bulk download (zip)
+    path("files/zip/", views.create_zip_download, name="create_zip_download"),
+    path("files/zip/<str:zip_name>/", views.serve_zip_download, name="serve_zip_download"),
 
     # Public sharing
     path("s/<str:token>/", views.shared_view, name="shared"),
@@ -46,6 +52,7 @@ urlpatterns = [
     path("s/<str:token>/upload/", views.shared_upload, name="shared_upload"),
     path("s/<str:token>/upload/chunk/", views.shared_upload_chunk, name="shared_upload_chunk"),
     path("s/<str:token>/folder/create/", views.shared_folder_create, name="shared_folder_create"),
+    path("s/<str:token>/folder/<int:folder_id>/rename/", views.shared_rename_folder, name="shared_rename_folder"),
     path("s/<str:token>/folder/<int:folder_id>/delete/", views.shared_delete_folder, name="shared_delete_folder"),
     path("s/<str:token>/tags/create/", views.shared_tag_create, name="shared_tag_create"),
     path("s/<str:token>/file/<int:file_id>/tag/", views.shared_tag_toggle, name="shared_tag_toggle"),

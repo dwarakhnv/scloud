@@ -37,6 +37,8 @@
     {% endfor %}
   </div>
 
+  <div class="item-count-row">{{ folder_count }} folder{{ folder_count|pluralize }} &middot; {{ file_count }} file{{ file_count|pluralize }}</div>
+
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
     <div class="view-switch">
       <button class="{% if view_mode == 'boxes' %}active{% endif %}" onclick="goView('boxes')">▦ Boxes</button>
@@ -45,10 +47,14 @@
     </div>
     <div style="display:flex;gap:8px;align-items:center;">
       <select onchange="goSort(this.value)" title="Sort by">
-        <option value="uploaded" {% if sort_mode == 'uploaded' %}selected{% endif %}>Upload date</option>
-        <option value="captured" {% if sort_mode == 'captured' %}selected{% endif %}>Media date</option>
-        <option value="name" {% if sort_mode == 'name' %}selected{% endif %}>File name</option>
-        <option value="type" {% if sort_mode == 'type' %}selected{% endif %}>File type</option>
+        <option value="name_asc" {% if sort_mode == 'name_asc' %}selected{% endif %}>File name (A-Z)</option>
+        <option value="name_desc" {% if sort_mode == 'name_desc' %}selected{% endif %}>File name (Z-A)</option>
+        <option value="uploaded_desc" {% if sort_mode == 'uploaded_desc' %}selected{% endif %}>Upload date (newest first)</option>
+        <option value="uploaded_asc" {% if sort_mode == 'uploaded_asc' %}selected{% endif %}>Upload date (oldest first)</option>
+        <option value="captured_desc" {% if sort_mode == 'captured_desc' %}selected{% endif %}>Media date (newest first)</option>
+        <option value="captured_asc" {% if sort_mode == 'captured_asc' %}selected{% endif %}>Media date (oldest first)</option>
+        <option value="type_asc" {% if sort_mode == 'type_asc' %}selected{% endif %}>File type (images first)</option>
+        <option value="type_desc" {% if sort_mode == 'type_desc' %}selected{% endif %}>File type (other first)</option>
         <option value="size_desc" {% if sort_mode == 'size_desc' %}selected{% endif %}>File size (largest first)</option>
         <option value="size_asc" {% if sort_mode == 'size_asc' %}selected{% endif %}>File size (smallest first)</option>
       </select>
@@ -80,8 +86,8 @@
     <div class="grid-boxes">
       {% for f in subfolders %}
         <div class="box-item folder-box" onclick="window.location='{% if space == 'group' %}{% url 'storage:group_folder' group.id f.id %}{% else %}{% url 'storage:my_space_folder' f.id %}{% endif %}'">
-          <button type="button" class="folder-delete-btn" title="Delete folder"
-                  onclick="event.stopPropagation();deleteFolder('{{ f.name|escapejs }}', {% if f.child_count == 0 and f.file_count == 0 %}true{% else %}false{% endif %}, '{% url 'storage:delete_folder' f.id %}')">🗑</button>
+          <button type="button" class="folder-delete-btn" title="Folder options"
+                  onclick="event.stopPropagation();openFolderMenu('{{ f.name|escapejs }}', {% if f.child_count == 0 and f.file_count == 0 %}true{% else %}false{% endif %}, '{% url 'storage:delete_folder' f.id %}', '{% url 'storage:rename_folder' f.id %}')">⋮</button>
           <div class="box-thumb">📁</div>
           <div class="box-label">{{ f.name }}</div>
         </div>
@@ -106,8 +112,8 @@
         <div class="list-row" onclick="window.location='{% if space == 'group' %}{% url 'storage:group_folder' group.id f.id %}{% else %}{% url 'storage:my_space_folder' f.id %}{% endif %}'" style="cursor:pointer;">
           <div class="list-thumb">📁</div>
           <div class="meta"><div class="name">{{ f.name }}</div><div class="sub">Folder</div></div>
-          <button type="button" class="overflow-menu-btn" title="Delete folder"
-                  onclick="event.stopPropagation();deleteFolder('{{ f.name|escapejs }}', {% if f.child_count == 0 and f.file_count == 0 %}true{% else %}false{% endif %}, '{% url 'storage:delete_folder' f.id %}')">🗑</button>
+          <button type="button" class="overflow-menu-btn" title="Folder options"
+                  onclick="event.stopPropagation();openFolderMenu('{{ f.name|escapejs }}', {% if f.child_count == 0 and f.file_count == 0 %}true{% else %}false{% endif %}, '{% url 'storage:delete_folder' f.id %}', '{% url 'storage:rename_folder' f.id %}')">⋮</button>
         </div>
       {% endfor %}
       {% for file in files %}
@@ -139,8 +145,8 @@
               <td></td>
               <td><a href="{% if space == 'group' %}{% url 'storage:group_folder' group.id f.id %}{% else %}{% url 'storage:my_space_folder' f.id %}{% endif %}">📁 {{ f.name }}</a></td>
               <td>Folder</td><td>—</td><td>{{ f.created_at|date:"M j, Y" }}</td><td>—</td>
-              <td><button class="overflow-menu-btn" title="Delete folder"
-                          onclick="deleteFolder('{{ f.name|escapejs }}', {% if f.child_count == 0 and f.file_count == 0 %}true{% else %}false{% endif %}, '{% url 'storage:delete_folder' f.id %}')">🗑</button></td>
+              <td><button class="overflow-menu-btn" title="Folder options"
+                          onclick="openFolderMenu('{{ f.name|escapejs }}', {% if f.child_count == 0 and f.file_count == 0 %}true{% else %}false{% endif %}, '{% url 'storage:delete_folder' f.id %}', '{% url 'storage:rename_folder' f.id %}')">⋮</button></td>
             </tr>
           {% endfor %}
           {% for file in files %}
@@ -167,8 +173,12 @@
          onchange="startUpload(this, '{{ space }}', '{{ group.id|default:"" }}', '{{ folder.id|default:"" }}')">
 </label>
 
-<div id="upload-progress" class="progress-bar" style="display:none;position:fixed;left:16px;right:16px;bottom:90px;z-index:40;">
-  <div class="fill"></div>
+<div id="upload-progress" class="upload-progress-wrap">
+  <div class="upload-progress-label">
+    <span id="upload-progress-text">Uploading...</span>
+    <span id="upload-progress-percent">0%</span>
+  </div>
+  <div class="progress-bar"><div class="fill"></div></div>
 </div>
 
 <!-- Bulk selection action bar -->
@@ -206,7 +216,7 @@
       {% csrf_token %}
       <div class="checkbox-row"><input type="checkbox" id="perm-upload" name="can_upload"><label for="perm-upload">Allow uploading files</label></div>
       <div class="checkbox-row"><input type="checkbox" id="perm-folders" name="can_create_folders"><label for="perm-folders">Allow creating folders</label></div>
-      <div class="checkbox-row"><input type="checkbox" id="perm-delete-folders" name="can_delete_folders"><label for="perm-delete-folders">Allow deleting folders</label></div>
+      <div class="checkbox-row"><input type="checkbox" id="perm-delete-folders" name="can_delete_folders"><label for="perm-delete-folders">Allow renaming/deleting folders</label></div>
       <div class="checkbox-row"><input type="checkbox" id="perm-tags" name="can_manage_tags"><label for="perm-tags">Allow adding/updating tags</label></div>
       <p class="sub" style="color:var(--text-secondary);font-size:12px;margin-top:4px;">Sharing includes everything inside this folder's subfolders too.</p>
       <button type="submit" class="btn block" style="margin-top:12px;">Create Share Link</button>
@@ -257,6 +267,14 @@
   window.SCLOUD_CHUNK_SIZE = {{ chunk_size_bytes }};
   window.SCLOUD_UPLOAD_URL = "{% url 'storage:upload_files' %}";
   window.SCLOUD_UPLOAD_CHUNK_URL = "{% url 'storage:upload_chunk' %}";
+
+  setupDropZone({
+    space: "{{ space }}",
+    groupId: "{{ group.id|default:'' }}",
+    folderId: "{{ folder.id|default:'' }}",
+    uploadUrl: window.SCLOUD_UPLOAD_URL,
+    chunkUrl: window.SCLOUD_UPLOAD_CHUNK_URL,
+  });
 
   function goView(mode) {
     window.location = '?view=' + mode + '&sort={{ sort_mode }}{% if active_tag %}&tag={{ active_tag.id }}{% endif %}';
