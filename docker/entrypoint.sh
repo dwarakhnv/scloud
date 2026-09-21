@@ -21,12 +21,18 @@ if [ ! -f config/config.env ]; then
 fi
 
 # --- 2. Database setup / migrations --------------------------------------
-# Migrations aren't committed to the repo, so they're (re)generated here.
-# This is idempotent: once applied, Django's django_migrations table means
-# re-running migrate on an unchanged schema is a no-op.
+# Migration FILES are committed to the repo (every machine/deploy applies
+# the exact same, byte-identical migration history) - only APPLYING them is
+# done here. This used to also run `makemigrations` to generate migration
+# files on the fly, since they weren't committed; that let the database
+# (persisted in a volume across deploys) and the migration history (baked
+# fresh into each image) drift out of sync - a schema change made on one
+# machine could get a different migration name/number on another, so
+# `migrate` would see a name it already considered "applied" and silently
+# skip adding a genuinely-missing column. That's a real outage class, not a
+# hypothetical one - don't reintroduce it.
 cd /app/src
-echo "[entrypoint] Preparing database..."
-python manage.py makemigrations accounts storage --noinput
+echo "[entrypoint] Applying database migrations..."
 python manage.py migrate --noinput
 
 # --- 3. Static files -------------------------------------------------------
