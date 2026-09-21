@@ -1022,7 +1022,19 @@ def shared_view(request, token, folder_id=None):
     owner, group, root_folder = _share_scope(link)
     current_folder = _resolve_shared_folder(link, folder_id)
 
-    subfolders_list = list(Folder.objects.filter(parent=current_folder).annotate(
+    if current_folder:
+        # parent is an exact FK to one specific Folder row, so this is
+        # already scoped correctly - only this folder's own children.
+        subfolders_qs = Folder.objects.filter(parent=current_folder)
+    elif group:
+        # Root of a whole-group share: `parent=None` alone would match
+        # every top-level folder for every user/group in the database, not
+        # just this one's - group=group is what actually scopes it.
+        subfolders_qs = Folder.objects.filter(parent=None, group=group)
+    else:
+        subfolders_qs = Folder.objects.none()
+
+    subfolders_list = list(subfolders_qs.annotate(
         child_count=Count("children", distinct=True), file_count=Count("files", distinct=True),
     ).order_by("name"))
 
